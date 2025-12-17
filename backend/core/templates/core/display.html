@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Customer Display</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 16px; background:#0b0b0b; color:#fff; }
+    h1 { margin: 0 0 12px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .card { background:#151515; border: 1px solid #222; border-radius: 14px; padding: 14px; }
+    .code { font-size: 18px; opacity: .85; }
+    .name { font-size: 14px; opacity: .7; margin-top:4px; }
+    .servingLabel { margin-top:10px; opacity:.7; font-size:14px; }
+    .serving { font-size: 56px; font-weight: 800; margin: 6px 0; }
+    .meta { display:flex; justify-content:space-between; opacity:.75; font-size:14px; margin-top:10px; }
+    .muted { opacity:.6; font-size:12px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Now Serving</h1>
+  <div class="grid" id="grid"></div>
+  <div class="muted">Auto refresh every 3 seconds • URL: /ui/display/</div>
+
+<script>
+function render(counters){
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  counters.forEach(c => {
+    const div = document.createElement("div");
+    div.className = "card";
+    div.innerHTML = `
+      <div class="code"><b>${c.code}</b></div>
+      <div class="name">${c.name || ""}</div>
+      <div class="servingLabel">Now Serving</div>
+      <div class="serving">${c.now_serving ?? "—"}</div>
+      <div class="meta">
+        <div>Waiting: <b>${c.waiting_count}</b></div>
+        <div>Next: <b>${c.next_token ?? "—"}</b></div>
+      </div>
+    `;
+    grid.appendChild(div);
+  });
+}
+
+async function refresh(){
+  try{
+    const res = await fetch("/ui/data/");
+    const j = await res.json();
+    if (j.ok) render(j.counters);
+  }catch(e){}
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
+

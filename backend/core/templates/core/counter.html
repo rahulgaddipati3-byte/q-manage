@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Counter Screen</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 18px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    select, button { font-size: 16px; padding: 10px; }
+    button { cursor: pointer; }
+    .card { margin-top: 14px; padding: 14px; border: 1px solid #ddd; border-radius: 10px; }
+    .big { font-size: 44px; font-weight: 700; margin: 10px 0; }
+    .muted { color:#666; }
+    .ok { color: green; }
+    .err { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h2>Counter Screen (Staff)</h2>
+
+  <div class="row">
+    <label><b>Counter:</b></label>
+    <select id="counter">
+      {% for c in counters %}
+        <option value="{{ c.code }}">{{ c.code }} - {{ c.name }}</option>
+      {% endfor %}
+    </select>
+
+    <button onclick="issueToken()">Issue Token</button>
+    <button onclick="callNext()">Call Next</button>
+
+    <a href="/ui/display/" target="_blank" class="muted">Open Customer Display</a>
+  </div>
+
+  <div class="card">
+    <div class="muted">Last action</div>
+    <div id="msg" class="muted">—</div>
+    <div class="big" id="big">—</div>
+  </div>
+
+<script>
+async function postJson(url, data){
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  const txt = await res.text();
+  let j = {};
+  try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error: txt }; }
+  if (!res.ok) throw j;
+  return j;
+}
+
+function getCounter(){
+  return document.getElementById("counter").value;
+}
+
+function setMsg(text, ok=true){
+  const el = document.getElementById("msg");
+  el.className = ok ? "ok" : "err";
+  el.textContent = text;
+}
+
+async function issueToken(){
+  const code = getCounter();
+  try{
+    const j = await postJson("/ui/issue/", { counter: code });
+    setMsg(`Issued token for ${j.counter}`, true);
+    document.getElementById("big").textContent = j.number;
+  }catch(e){
+    setMsg(e.error || "Issue failed", false);
+  }
+}
+
+async function callNext(){
+  const code = getCounter();
+  try{
+    const j = await postJson("/ui/call-next/", { counter: code });
+    setMsg(`Now serving at ${j.counter}`, true);
+    document.getElementById("big").textContent = j.number;
+  }catch(e){
+    setMsg(e.error || "Call next failed", false);
+  }
+}
+</script>
+</body>
+</html>

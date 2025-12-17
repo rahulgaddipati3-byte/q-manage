@@ -1,0 +1,33 @@
+﻿services:
+  mysql:
+    image: mysql:8.0
+    container_name: qmanage_mysql
+    environment:
+      MYSQL_DATABASE: qmanage
+      MYSQL_USER: qmanage
+      MYSQL_PASSWORD: qmanagepass
+      MYSQL_ROOT_PASSWORD: rootpass
+    ports:
+      - "3307:3306"
+    volumes:
+      - qmanage_mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    container_name: qmanage_redis
+    ports:
+      - "6379:6379"
+
+  web:
+    build: .
+    container_name: qmanage_web
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mysql
+      - redis
+
+volumes:
+  qmanage_mysql_data:
