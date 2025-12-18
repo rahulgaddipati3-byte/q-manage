@@ -1,4 +1,4 @@
-﻿FROM python:3.12-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -9,5 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# keep container alive; we will run django commands via docker compose exec
-CMD ["sh", "-c", "tail -f /dev/null"]
+# copy backend code
+COPY backend /app/backend
+
+# collect static files
+RUN python backend/manage.py collectstatic --noinput
+
+# start django using render's port
+CMD gunicorn qmanage.wsgi:application --chdir backend --bind 0.0.0.0:$PORT
