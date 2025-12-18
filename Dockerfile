@@ -15,5 +15,5 @@ COPY backend /app/backend
 # collect static files
 RUN python backend/manage.py collectstatic --noinput
 
-# start django using render's port
+# start django using render's por
 CMD gunicorn qmanage.wsgi:application --chdir backend --bind 0.0.0.0:$PORT
