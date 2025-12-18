@@ -64,14 +64,17 @@ WSGI_APPLICATION = 'qmanage.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+DB_PATH = os.getenv("SQLITE_PATH", str(BASE_DIR / "db.sqlite3"))
+
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": "qmanage",
-        "USER": "qmanage",
-        "PASSWORD": "qmanagepass",
-        "HOST": "mysql",   # service name from docker-compose
-        "PORT": "3306",
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": DB_PATH,
     }
 }
 
