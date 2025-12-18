@@ -121,3 +121,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/admin-dashboard/"
 LOGOUT_REDIRECT_URL = "/login/"
+import os
+
+STATIC_URL = "/static/"
+STATIC_ROOT = os.getenv("DJANGO_STATIC_ROOT", os.path.join(BASE_DIR, "staticfiles"))

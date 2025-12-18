@@ -27,3 +27,7 @@ media/
 
 # Docker artifacts
 *.pid
+__pycache__/
+*.pyc
+__pycache__/
+*.pyc
