@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Create User</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body{font-family:Arial,sans-serif;padding:18px;max-width:520px;margin:auto}
+    .card{border:1px solid #ddd;border-radius:10px;padding:16px}
+    input{width:100%;padding:10px;margin:8px 0;font-size:16px}
+    button{padding:10px 14px;font-size:16px;cursor:pointer}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .muted{color:#666}
+    .msg{margin:10px 0;padding:10px;border-radius:8px}
+    .err{background:#ffe7ea;border:1px solid #ffb3bd}
+    .ok{background:#e7ffee;border:1px solid #9dffb6}
+  </style>
+</head>
+<body>
+
+  <h2>Create New User (Staff)</h2>
+  <p class="muted">This creates a normal user (not superuser). Optionally mark as Staff.</p>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="msg {% if m.tags == 'error' %}err{% else %}ok{% endif %}">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="card">
+    <form method="post">
+      {% csrf_token %}
+
+      <label><b>Username</b></label>
+      <input name="username" placeholder="e.g. counter1" required />
+
+      <label><b>Password</b></label>
+      <input name="password1" type="password" placeholder="Min 6 chars" required />
+
+      <label><b>Confirm Password</b></label>
+      <input name="password2" type="password" required />
+
+      <div class="row">
+        <label><input type="checkbox" name="make_staff" checked /> Make Staff (can login)</label>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button type="submit">Create User</button>
+        <a class="muted" href="/admin-dashboard/">Back to Dashboard</a>
+      </div>
+    </form>
+  </div>
+
+</body>
+</html>

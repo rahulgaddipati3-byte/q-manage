@@ -13,7 +13,7 @@
     .big { font-size: 44px; font-weight: 700; margin: 10px 0; }
     .muted { color:#666; }
     .ok { color: green; }
-    .err { color: #b00020; }
+    .err { color: #b00020; white-space: pre-wrap; word-break: break-word; }
   </style>
 </head>
 <body>
@@ -46,10 +46,13 @@ async function postJson(url, data){
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
   });
+
   const txt = await res.text();
-  let j = {};
-  try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error: txt }; }
-  if (!res.ok) throw j;
+  let j = null;
+  try { j = JSON.parse(txt); }
+  catch(e) { j = { ok:false, error: txt || `HTTP ${res.status}` }; }
+
+  if (!res.ok) throw { status: res.status, ...j };
   return j;
 }
 
@@ -66,22 +69,24 @@ function setMsg(text, ok=true){
 async function issueToken(){
   const code = getCounter();
   try{
-    const j = await postJson("/ui/issue/", { counter: code });
-    setMsg(`Issued token for ${j.counter}`, true);
+    // ✅ CORRECT: API endpoint
+    const j = await postJson("/api/token/issue/", { counter: code });
+    setMsg(`Issued token: ${j.number}`, true);
     document.getElementById("big").textContent = j.number;
   }catch(e){
-    setMsg(e.error || "Issue failed", false);
+    setMsg((e.error || "Issue failed") + (e.status ? ` (HTTP ${e.status})` : ""), false);
   }
 }
 
 async function callNext(){
   const code = getCounter();
   try{
-    const j = await postJson("/ui/call-next/", { counter: code });
-    setMsg(`Now serving at ${j.counter}`, true);
+    // ✅ CORRECT: API endpoint
+    const j = await postJson("/api/token/next/", { counter: code });
+    setMsg(`Now serving at ${j.counter}: ${j.number}`, true);
     document.getElementById("big").textContent = j.number;
   }catch(e){
-    setMsg(e.error || "Call next failed", false);
+    setMsg((e.error || "Call next failed") + (e.status ? ` (HTTP ${e.status})` : ""), false);
   }
 }
 </script>

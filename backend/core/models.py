@@ -1,27 +1,23 @@
+# backend/core/models.py
+from datetime import timedelta
 from django.db import models
 from django.utils import timezone
-from datetime import timedelta
-import random
+
 
 # IMPORTANT:
-# This function MUST exist because an old migration references:
-# core.models.default_expires_at
+# Old migration 0005 imports this function: core.models.default_expires_at
+# Keep it forever (even if you don't use it in new code), otherwise migrations break.
 def default_expires_at():
     return timezone.now() + timedelta(minutes=10)
 
 
 class Counter(models.Model):
-    """
-    A counter/service desk (clinic room, salon chair, cashier, etc.)
-    """
-    code = models.CharField(max_length=20, unique=True)   # e.g. "c1", "C1"
-    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=20, unique=True)
+    name = models.CharField(max_length=100, blank=True, default="")
     is_active = models.BooleanField(default=True)
 
-    created_at = models.DateTimeField(auto_now_add=True)
-
     def __str__(self):
-        return f"{self.code} - {self.name}"
+        return f"{self.code} - {self.name or self.code}"
 
 
 class Token(models.Model):
@@ -31,49 +27,25 @@ class Token(models.Model):
         ("expired", "Expired"),
     )
 
-    counter = models.ForeignKey(
-        Counter,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="tokens",
-    )
+    counter = models.ForeignKey(Counter, null=True, blank=True, on_delete=models.SET_NULL)
 
-    # What customer sees (A001, A002...)
-    number = models.CharField(max_length=10, unique=True, blank=True)
-
-    # Product-ready sequencing (per day per counter)
-    service_date = models.DateField(null=True, blank=True, db_index=True)
-    sequence = models.PositiveIntegerField(default=0, db_index=True)
-
+    number = models.CharField(max_length=20)  # <-- REMOVE unique=True
+    service_date = models.DateField(db_index=True)
+    sequence = models.PositiveIntegerField(db_index=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
-
     created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(default=default_expires_at)
     used_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(default=default_expires_at)
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(
-                fields=["counter", "service_date", "sequence"],
-                name="uniq_counter_day_sequence",
-            )
+            models.UniqueConstraint(fields=["service_date", "number"], name="uniq_token_number_per_day"),
+            models.UniqueConstraint(fields=["service_date", "sequence"], name="uniq_token_seq_per_day"),
         ]
 
-    def is_expired(self) -> bool:
-        return timezone.now() >= self.expires_at
-
-    def save(self, *args, **kwargs):
-        # Keep compatibility: if something creates Token without number, still generate something
-        if not self.number:
-            # fallback random (should not happen if you use issue_token API)
-            self.number = str(random.randint(100000, 999999))
-
-        # live expiry correction
-        if self.status == "active" and self.is_expired():
-            self.status = "expired"
-
-        super().save(*args, **kwargs)
+    def is_expired(self):
+        return bool(self.expires_at and timezone.now() >= self.expires_at)
 
     def __str__(self):
         return self.number
+

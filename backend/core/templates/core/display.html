@@ -2,58 +2,165 @@
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Customer Display</title>
+  <title>Now Serving</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <style>
-    body { font-family: Arial, sans-serif; padding: 16px; background:#0b0b0b; color:#fff; }
-    h1 { margin: 0 0 12px; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
-    .card { background:#151515; border: 1px solid #222; border-radius: 14px; padding: 14px; }
-    .code { font-size: 18px; opacity: .85; }
-    .name { font-size: 14px; opacity: .7; margin-top:4px; }
-    .servingLabel { margin-top:10px; opacity:.7; font-size:14px; }
-    .serving { font-size: 56px; font-weight: 800; margin: 6px 0; }
-    .meta { display:flex; justify-content:space-between; opacity:.75; font-size:14px; margin-top:10px; }
-    .muted { opacity:.6; font-size:12px; margin-top: 10px; }
+    :root { --bg:#0b0b0b; --card:#141414; --text:#fff; --muted:#a8a8a8; }
+    body { margin:0; font-family: Arial, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { padding: 22px; }
+    h1 { margin: 0 0 18px 0; font-size: 44px; letter-spacing: .5px; }
+
+    /* grid becomes 1 column on mobile */
+    .grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:18px; }
+    @media (max-width: 900px){ h1{font-size:36px;} .grid{grid-template-columns:1fr;} }
+    @media (max-width: 480px){ h1{font-size:30px;} .wrap{padding:14px;} }
+
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 18px;
+      padding: 18px;
+
+      /* layout flow */
+      display: flex;
+      flex-direction: column;
+
+      /* enough height so bottom row always has space */
+      min-height: 220px;
+    }
+
+    .top { display:flex; justify-content:space-between; gap:10px; }
+    .code { font-size: 22px; font-weight: 700; }
+    .name { color: var(--muted); margin-top: 6px; }
+    .label { color: var(--muted); margin-top: 14px; font-size: 14px; }
+
+    .big {
+      font-size: 88px;
+      font-weight: 800;
+      margin-top: 10px;
+      letter-spacing: 1px;
+      line-height: 1.0;
+      word-break: break-word;
+    }
+
+    /* ✅ FIX: placeholder should NOT be huge */
+    .big.empty{
+      font-size: 48px;
+      opacity: 0.35;
+      letter-spacing: 0;
+    }
+
+    @media (max-width: 900px){ .big{font-size:72px;} .card{min-height:210px;} .big.empty{font-size:44px;} }
+    @media (max-width: 480px){ .big{font-size:64px;} .card{min-height:200px;} .big.empty{font-size:40px;} }
+
+    .bottom {
+      margin-top: auto;
+      padding-top: 12px;
+      display:flex;
+      justify-content:space-between;
+      gap: 14px;
+      color:var(--muted);
+      border-top: 1px solid rgba(255,255,255,.08);
+    }
+
+    .pill { padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.12); }
+    .controls { display:flex; gap:10px; flex-wrap:wrap; margin: 8px 0 14px; color:var(--muted); font-size: 14px; }
+    .controls label { display:flex; align-items:center; gap:8px; }
+    .note { margin-top: 12px; color: var(--muted); font-size: 13px; }
   </style>
 </head>
 <body>
-  <h1>Now Serving</h1>
-  <div class="grid" id="grid"></div>
-  <div class="muted">Auto refresh every 3 seconds • URL: /ui/display/</div>
+  <div class="wrap">
+    <h1>Now Serving</h1>
+
+    <div class="controls">
+      <label><input id="soundOn" type="checkbox" checked> Sound</label>
+      <label><input id="voiceOn" type="checkbox"> Voice</label>
+      <span class="pill">Auto refresh every 3 seconds</span>
+      <span class="pill">URL: /ui/display/</span>
+    </div>
+
+    <div class="grid" id="grid"></div>
+
+    <div class="note">Tip: Open this page on a phone (works on 4G/5G).</div>
+  </div>
 
 <script>
-function render(counters){
+let lastNowServing = {}; // per counter code
+
+function beep(){
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = "sine";
+  o.frequency.value = 880;
+  g.gain.value = 0.05;
+  o.connect(g); g.connect(ctx.destination);
+  o.start();
+  setTimeout(()=>{ o.stop(); ctx.close(); }, 180);
+}
+
+function speak(text){
+  if (!("speechSynthesis" in window)) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 1.0; u.pitch = 1.0;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(u);
+}
+
+function renderCounters(counters){
   const grid = document.getElementById("grid");
   grid.innerHTML = "";
+
   counters.forEach(c => {
-    const div = document.createElement("div");
-    div.className = "card";
-    div.innerHTML = `
-      <div class="code"><b>${c.code}</b></div>
-      <div class="name">${c.name || ""}</div>
-      <div class="servingLabel">Now Serving</div>
-      <div class="serving">${c.now_serving ?? "—"}</div>
-      <div class="meta">
-        <div>Waiting: <b>${c.waiting_count}</b></div>
-        <div>Next: <b>${c.next_token ?? "—"}</b></div>
+    const hasNow = !!c.now_serving;
+    const now = hasNow ? c.now_serving : "—";
+    const next = c.next_token || "—";
+    const waiting = c.waiting_count ?? 0;
+
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div class="top">
+        <div>
+          <div class="code">${c.code}</div>
+          <div class="name">${c.name || ""}</div>
+          <div class="label">Now Serving</div>
+        </div>
+      </div>
+
+      <div class="${hasNow ? "big" : "big empty"}">${now}</div>
+
+      <div class="bottom">
+        <div>Waiting: <b>${waiting}</b></div>
+        <div>Next: <b>${next}</b></div>
       </div>
     `;
-    grid.appendChild(div);
+    grid.appendChild(card);
+
+    // announce when now_serving changes to a real token (including first time)
+    const prev = lastNowServing[c.code];
+    if (now !== "—" && prev !== now) {
+      const soundOn = document.getElementById("soundOn").checked;
+      const voiceOn = document.getElementById("voiceOn").checked;
+
+      if (soundOn) beep();
+      if (voiceOn) speak(`${c.code}. Token ${now}. Please proceed to counter.`);
+    }
+    lastNowServing[c.code] = now;
   });
 }
 
-async function refresh(){
+async function load(){
   try{
     const res = await fetch("/ui/data/");
     const j = await res.json();
-    if (j.ok) render(j.counters);
+    if (j.ok) renderCounters(j.counters);
   }catch(e){}
 }
 
-refresh();
-setInterval(refresh, 3000);
+load();
+setInterval(load, 3000);
 </script>
 </body>
 </html>
-

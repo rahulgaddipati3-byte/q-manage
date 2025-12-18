@@ -1,13 +1,17 @@
+# backend/core/views_ui.py
+import json
 from django.shortcuts import render
 from django.http import JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
-from django.utils import timezone
 from django.db import transaction
+from django.contrib.auth.decorators import login_required
 
 from .models import Counter, Token
 
 
+@login_required
 def counter_screen(request):
     counters = Counter.objects.filter(is_active=True).order_by("code")
     return render(request, "core/counter.html", {"counters": counters})
@@ -21,21 +25,19 @@ def display_screen(request):
 @require_GET
 def display_data(request):
     """
-    Returns status for all active counters:
-    - now_serving: last USED token number
-    - waiting_count: ACTIVE tokens count
-    - next_token: oldest ACTIVE token number
+    UI display data:
+    now_serving = last USED token for that counter
+    waiting_count = ACTIVE tokens assigned to that counter
+    next_token = oldest ACTIVE token assigned to that counter
     """
     rows = []
     counters = Counter.objects.filter(is_active=True).order_by("code")
 
     for c in counters:
-        # Waiting
         active_qs = Token.objects.filter(counter=c, status="active").order_by("created_at")
         waiting_count = active_qs.count()
         next_token = active_qs.first().number if waiting_count else None
 
-        # Now serving (latest used)
         last_used = (
             Token.objects.filter(counter=c, status="used", used_at__isnull=False)
             .order_by("-used_at")
@@ -55,50 +57,29 @@ def display_data(request):
 
 
 @csrf_exempt
+@login_required
 def ui_issue_token(request):
     """
-    POST /ui/issue/
-    body: {"counter":"c1"}   (required)
+    Uses API endpoint internally by creating ACTIVE token for selected counter.
+    Note: number/sequence/service_date are handled in core/views.py issue_token (API).
+    But if you are issuing directly here, you MUST create properly.
+    Best: call /api/token/issue/ from counter.html (recommended) and not create here.
     """
-    if request.method != "POST":
-        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
-
-    import json
-    body = json.loads(request.body.decode("utf-8") or "{}")
-    counter_code = str(body.get("counter", "")).strip()
-
-    if not counter_code:
-        return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
-
-    counter, _ = Counter.objects.get_or_create(code=counter_code, defaults={"name": counter_code})
-
-    token = Token.objects.create(counter=counter)
-
-    return JsonResponse({
-        "ok": True,
-        "message": "Token issued",
-        "counter": counter.code,
-        "number": token.number,
-        "status": token.status,
-        "created_at": token.created_at,
-        "expires_at": token.expires_at,
-    })
+    return JsonResponse({"ok": False, "error": "Use /api/token/issue/ via counter.html"}, status=400)
 
 
 @csrf_exempt
+@login_required
 def ui_call_next(request):
     """
-    POST /ui/call-next/
-    body: {"counter":"c1"}   (required)
-    Picks the oldest ACTIVE token for that counter (FIFO), marks USED.
+    Calls the next token via API logic:
+    Picks oldest ACTIVE token for this counter, marks USED.
     """
     if request.method != "POST":
         return JsonResponse({"ok": False, "error": "POST required"}, status=405)
 
-    import json
     body = json.loads(request.body.decode("utf-8") or "{}")
     counter_code = str(body.get("counter", "")).strip()
-
     if not counter_code:
         return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
 
@@ -108,7 +89,6 @@ def ui_call_next(request):
         return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
 
     with transaction.atomic():
-        # lock + pick oldest active
         token = (
             Token.objects.select_for_update()
             .filter(counter=counter, status="active")
@@ -116,7 +96,6 @@ def ui_call_next(request):
             .first()
         )
 
-        # expire expired ones and keep searching
         while token and token.is_expired():
             token.status = "expired"
             token.save(update_fields=["status"])
@@ -140,5 +119,5 @@ def ui_call_next(request):
         "counter": counter.code,
         "number": token.number,
         "status": token.status,
-        "used_at": token.used_at,
+        "used_at": token.used_at.isoformat() if token.used_at else None,
     })
