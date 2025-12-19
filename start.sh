@@ -1,11 +1,15 @@
 #!/usr/bin/env sh
 set -e
 
-echo "Running migrations..."
 cd /app/backend
+
+echo "Running migrations..."
 python manage.py migrate --noinput
 
-echo "Collecting static..."
+echo "Creating superuser (if needed)..."
+python manage.py createsu
+
+echo "Collecting static files..."
 python manage.py collectstatic --noinput
 
 echo "Starting server..."
