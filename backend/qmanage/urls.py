@@ -1,13 +1,17 @@
+# backend/qmanage/urls.py
 from django.contrib import admin
+from django.http import HttpResponseNotFound
 from django.urls import path, include
-from django.shortcuts import redirect
-from django.urls import path
+
+
+def admin_disabled(request):
+    return HttpResponseNotFound("Admin disabled. Use /admin-dashboard/ instead.")
 
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("accounts/", include("django.contrib.auth.urls")),
-    path("", lambda request: redirect("/ui/issue/")),
+    # Block Django admin completely
+    path("admin/", admin_disabled),
 
-    path("", include("core.urls")),  # <-- pulls all api routes from core/urls.py
+    # Your app routes
+    path("", include("core.urls")),
 ]
