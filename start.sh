@@ -1,16 +1,15 @@
 #!/usr/bin/env sh
 set -e
 
-cd /app/backend
-
 echo "Running migrations..."
+cd /app/backend
 python manage.py migrate --noinput
 
-echo "Creating superuser (if needed)..."
-python manage.py createsu
+echo "Bootstrapping (superuser + counters)..."
+python manage.py bootstrap
 
-echo "Collecting static files..."
+echo "Collecting static..."
 python manage.py collectstatic --noinput
 
 echo "Starting server..."
-gunicorn qmanage.wsgi:application --bind 0.0.0.0:$PORT
+gunicorn qmanage.wsgi:application --bind 0.0.0.0:${PORT}
