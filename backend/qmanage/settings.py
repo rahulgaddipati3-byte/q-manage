@@ -17,11 +17,16 @@ DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 
 ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",")
 
-# For Render CSRF
+# Detect environment (local vs Render)
+IS_RENDER = os.getenv("RENDER", "") != ""
+IS_LOCAL = not IS_RENDER
+
+# For Render CSRF (include your real Render domain)
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000",
     "http://127.0.0.1:8000",
     "https://q-manage.onrender.com",
+    "https://q-manage.onrender.com",  # keep if your service uses this
 ]
 
 # ----------------------------
@@ -37,8 +42,11 @@ INSTALLED_APPS = [
     "core",
 ]
 
+# ✅ WhiteNoise must be immediately after SecurityMiddleware
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -101,6 +109,16 @@ USE_TZ = True
 # ----------------------------
 STATIC_URL = "/static/"
 STATIC_ROOT = os.getenv("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles"))
+
+# ✅ Django 5+ way (replaces STATICFILES_STORAGE)
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    }
+}
+
+# Optional but helpful with WhiteNoise
+WHITENOISE_USE_FINDERS = DEBUG
 
 # ----------------------------
 # Auth redirects
