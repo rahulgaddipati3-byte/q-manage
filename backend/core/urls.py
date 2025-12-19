@@ -1,28 +1,40 @@
 from django.urls import path
+from django.http import HttpResponseNotFound
 from . import views, views_ui, views_auth, views_admin, views_users
 
+
+def admin_disabled(request):
+    return HttpResponseNotFound("Admin disabled. Use /admin-dashboard/ instead.")
+
+
 urlpatterns = [
+    # Block Django admin URL (so /admin/ never shows Django admin)
+    path("admin/", admin_disabled, name="admin_disabled"),
+
+    # Optional: make homepage go to staff login (nice for demo)
+    path("", views_auth.staff_login, name="home"),
+
     # Auth
     path("login/", views_auth.staff_login, name="staff_login"),
     path("logout/", views_auth.staff_logout, name="staff_logout"),
 
-    # Admin Dashboard
+    # Admin Dashboard (your custom one)
     path("admin-dashboard/", views_admin.admin_dashboard, name="admin_dashboard"),
 
     # Staff user management
     path("users/new/", views_users.user_create, name="user_create"),
 
     # API
-    path("api/token/issue/", views.issue_token),
-    path("api/token/next/", views.next_token),
-    path("api/token/consume/", views.consume_token),
-    path("api/token/status/<str:number>/", views.token_status),
-    path("api/queue/status/", views.queue_status),
+    path("api/token/issue/", views.issue_token, name="api_issue_token"),
+    path("api/token/next/", views.next_token, name="api_next_token"),
+    path("api/token/consume/", views.consume_token, name="api_consume_token"),
+    path("api/token/status/<str:number>/", views.token_status, name="api_token_status"),
+    path("api/queue/status/", views.queue_status, name="api_queue_status"),
 
     # UI
-    path("ui/counter/", views_ui.counter_screen),
-    path("ui/display/", views_ui.display_screen),
-    path("ui/data/", views_ui.display_data),
-    path("ui/issue/", views_ui.ui_issue_token),
-    path("ui/call-next/", views_ui.ui_call_next),
+    path("ui/counter/", views_ui.counter_screen, name="ui_counter"),
+    path("ui/display/", views_ui.display_screen, name="ui_display"),
+    path("ui/data/", views_ui.display_data, name="ui_display_data"),
+    path("ui/issue/", views_ui.ui_issue_token, name="ui_issue_token"),
+    path("ui/call-next/", views_ui.ui_call_next, name="ui_call_next"),
 ]
