@@ -57,17 +57,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # ✅ Ensure columns EXIST before RunPython (this is what was breaking on Render)
-        migrations.AddField(
-            model_name="token",
-            name="service_date",
-            field=models.DateField(null=True, blank=True, db_index=True),
-        ),
-        migrations.AddField(
-            model_name="token",
-            name="sequence",
-            field=models.PositiveIntegerField(null=True, blank=True),
-        ),
-
-        migrations.RunPython(backfill, migrations.RunPython.noop),
-    ]
+    migrations.RunPython(backfill, migrations.RunPython.noop),
+]
