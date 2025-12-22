@@ -130,3 +130,39 @@ def public_request_status(request, request_id):
 def public_token_page(request, token_id):
     token = get_object_or_404(Token, id=token_id)
     return render(request, "public/token.html", {"token": token})
+# --------------------------------------------------
+# Public: token live status API (USED BY token.html)
+# --------------------------------------------------
+@require_GET
+def public_token_status(request, token_id):
+    token = get_object_or_404(Token, id=token_id)
+
+    service_date = token.service_date
+
+    # Last served token today
+    last_used = (
+        Token.objects
+        .filter(service_date=service_date, status="used")
+        .order_by("-used_at", "-id")
+        .first()
+    )
+
+    # Tokens ahead of this token
+    ahead = Token.objects.filter(
+        service_date=service_date,
+        status="active",
+        sequence__lt=token.sequence
+    ).count()
+
+    avg_minutes = 5
+    est_wait = ahead * avg_minutes
+
+    return JsonResponse({
+        "ok": True,
+        "your_token": token.number,
+        "your_status": token.status,
+        "now_serving": last_used.number if last_used else None,
+        "tokens_ahead": ahead,
+        "estimated_wait_minutes": est_wait,
+        "service_date": str(service_date),
+    })
