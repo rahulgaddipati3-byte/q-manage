@@ -13,11 +13,45 @@ from .models import Token, ReservationRequest
 PHONE_RE = re.compile(r"^\d{10}$|^91\d{10}$")
 
 
+# --------------------------------------------------
+# Public clinic landing page
+# --------------------------------------------------
 @require_GET
 def public_clinic_page(request, slug):
     return render(request, "public/clinic.html", {"clinic_slug": slug})
 
 
+# --------------------------------------------------
+# Public clinic snapshot API (for clinic.html)
+# --------------------------------------------------
+@require_GET
+def public_clinic_snapshot(request, slug):
+    service_date = timezone.localdate()
+
+    last_used = (
+        Token.objects
+        .filter(service_date=service_date, status="used")
+        .order_by("-used_at", "-id")
+        .first()
+    )
+
+    waiting = Token.objects.filter(service_date=service_date, status="active").count()
+
+    avg_minutes = 5
+    est_wait = waiting * avg_minutes
+
+    return JsonResponse({
+        "ok": True,
+        "clinic": slug,
+        "now_serving": last_used.number if last_used else None,
+        "waiting_count": waiting,
+        "estimated_wait_minutes": est_wait,
+    })
+
+
+# --------------------------------------------------
+# Public: reserve token (creates ReservationRequest)
+# --------------------------------------------------
 @csrf_exempt
 @require_POST
 def public_reserve_token(request, slug):
@@ -31,8 +65,12 @@ def public_reserve_token(request, slug):
 
     if not name:
         return JsonResponse({"ok": False, "error": "Name is required"}, status=400)
+
     if not phone or not PHONE_RE.match(phone):
-        return JsonResponse({"ok": False, "error": "Enter valid 10-digit mobile (or 91XXXXXXXXXX)"}, status=400)
+        return JsonResponse(
+            {"ok": False, "error": "Enter valid 10-digit mobile (or 91XXXXXXXXXX)"},
+            status=400,
+        )
 
     service_date = timezone.localdate()
 
@@ -50,19 +88,31 @@ def public_reserve_token(request, slug):
     })
 
 
+# --------------------------------------------------
+# Public: reservation tracking page
+# --------------------------------------------------
 @require_GET
 def public_request_page(request, request_id):
     req = get_object_or_404(ReservationRequest, id=request_id)
     return render(request, "public/request.html", {"req": req})
 
 
+# --------------------------------------------------
+# Public: reservation status API (polling)
+# --------------------------------------------------
 @require_GET
 def public_request_status(request, request_id):
     req = get_object_or_404(ReservationRequest, id=request_id)
+
     token_number = req.token.number if req.token else None
     token_url = f"/public/token/{req.token.id}/" if req.token else None
 
-    scheduled = timezone.localtime(req.scheduled_time).strftime("%I:%M %p").lstrip("0") if req.scheduled_time else None
+    scheduled = (
+        timezone.localtime(req.scheduled_time)
+        .strftime("%I:%M %p")
+        .lstrip("0")
+        if req.scheduled_time else None
+    )
 
     return JsonResponse({
         "ok": True,
@@ -71,3 +121,12 @@ def public_request_status(request, request_id):
         "scheduled_time_display": scheduled,
         "token_track_url": token_url,
     })
+
+
+# --------------------------------------------------
+# Public: token tracking page (REQUIRED by urls.py)
+# --------------------------------------------------
+@require_GET
+def public_token_page(request, token_id):
+    token = get_object_or_404(Token, id=token_id)
+    return render(request, "public/token.html", {"token": token})
