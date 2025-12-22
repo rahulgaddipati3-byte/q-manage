@@ -42,6 +42,35 @@ class Token(models.Model):
             models.UniqueConstraint(fields=["service_date", "number"], name="uniq_token_number_per_day"),
             models.UniqueConstraint(fields=["service_date", "sequence"], name="uniq_token_seq_per_day"),
         ]
+class ReservationRequest(models.Model):
+    STATUS_CHOICES = (
+        ("pending", "Pending"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+    )
+
+    service_date = models.DateField(db_index=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
+
+    # Required from customer
+    name = models.CharField(max_length=120)
+    phone = models.CharField(max_length=15)  # store 10-digit or 91XXXXXXXXXX
+
+    # Staff confirms this time
+    scheduled_time = models.DateTimeField(null=True, blank=True)
+
+    # Token created only after approval
+    token = models.OneToOneField(Token, null=True, blank=True, on_delete=models.SET_NULL)
+
+    # SMS status
+    sms_sent = models.BooleanField(default=False)
+    sms_error = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Req {self.id} ({self.status})"
 
     def is_expired(self):
         return bool(self.expires_at and timezone.now() >= self.expires_at)

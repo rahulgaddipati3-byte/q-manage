@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Request Status</title>
+  <style>
+    body { font-family: system-ui; padding: 18px; background:#0b1220; color:#eaf0ff; }
+    .card { background:#111a2e; padding:16px; border-radius:14px; max-width:520px; margin:auto; }
+    .big { font-size: 32px; font-weight: 800; margin: 10px 0; }
+    .muted { opacity:.75; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="muted">Request ID</div>
+    <div class="big">#{{ req.id }}</div>
+
+    <div class="muted">Status</div>
+    <div class="big" id="status">{{ req.status|upper }}</div>
+
+    <div id="msg" class="muted">Waiting for staff approval…</div>
+  </div>
+
+<script>
+const id = "{{ req.id }}";
+const url = `/api/public/request/${id}/status/`;
+
+async function poll(){
+  const r = await fetch(url);
+  const d = await r.json();
+  if(!d.ok) return;
+
+  document.getElementById("status").textContent = (d.status || "").toUpperCase();
+
+  if(d.status === "approved"){
+    document.getElementById("msg").innerHTML =
+      `✅ Approved. Your token is <b>${d.token_number}</b>.<br/>Please come by <b>${d.scheduled_time_display}</b>. Redirecting…`;
+    setTimeout(() => window.location.href = d.token_track_url, 1500);
+  } else if(d.status === "rejected"){
+    document.getElementById("msg").textContent = "❌ Rejected. Please contact reception.";
+  } else {
+    document.getElementById("msg").textContent = "Waiting for staff approval…";
+  }
+}
+
+poll();
+setInterval(poll, 5000);
+</script>
+</body>
+</html>
