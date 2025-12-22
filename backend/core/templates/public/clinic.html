@@ -13,8 +13,8 @@
     label { display:block; margin: 10px 0 6px; }
     input { width:100%; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:#0b1220; color:#fff; }
     button { width:100%; padding:14px; border:0; border-radius:14px; background:#2f6df6; color:#fff; font-size:16px; cursor:pointer; margin-top:12px; }
-    .err { color:#ffb4b4; white-space:pre-wrap; }
-    .ok { color:#a7ffb1; white-space:pre-wrap; }
+    .err { color:#ffb4b4; white-space:pre-wrap; word-break:break-word; }
+    .ok { color:#a7ffb1; white-space:pre-wrap; word-break:break-word; }
     a { color:#9bbcff; }
   </style>
 </head>
@@ -37,7 +37,7 @@
       <input id="name" placeholder="Your name" />
 
       <label for="phone"><b>Mobile</b></label>
-      <input id="phone" placeholder="10-digit mobile (or 91XXXXXXXXXX)" />
+      <input id="phone" placeholder="10-digit mobile (or 91XXXXXXXXXX)" inputmode="numeric" />
 
       <button onclick="reserve()">Reserve Token</button>
 
@@ -59,17 +59,27 @@ async function getSnapshot(){
   try{
     const res = await fetch(`/api/public/clinic/${clinicSlug}/snapshot/`);
     const j = await res.json();
+
+    if (!res.ok || !j.ok) throw new Error(j.error || "snapshot failed");
+
     document.getElementById("nowServing").textContent = j.now_serving || "—";
+
+    // ✅ correct keys
     document.getElementById("stats").textContent =
-      `Estimated wait: ${j.estimated_wait_min} min (approx) • People waiting: ${j.people_waiting}`;
+      `Estimated wait: ${j.estimated_wait_minutes} min (approx) • People waiting: ${j.waiting_count}`;
   }catch(e){
     document.getElementById("stats").textContent = "Could not load snapshot";
   }
 }
 
+function digitsOnly(s){
+  return (s || "").replace(/[^\d]/g, "");
+}
+
 async function reserve(){
   const name = document.getElementById("name").value.trim();
-  const phone = document.getElementById("phone").value.trim();
+  const phoneRaw = document.getElementById("phone").value.trim();
+  const phone = digitsOnly(phoneRaw); // ✅ removes hyphen etc
 
   if(!name){ setMsg("Name is required", false); return; }
   if(!phone){ setMsg("Mobile is required", false); return; }
@@ -90,8 +100,7 @@ async function reserve(){
       return;
     }
 
-    setMsg(`Request submitted ✅\nTracking: ${j.track_url}`, true);
-    // open tracking page
+    setMsg(`Request submitted ✅\nRedirecting…`, true);
     window.location.href = j.track_url;
   }catch(e){
     setMsg("Network error. Please try again.", false);
