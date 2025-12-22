@@ -1,67 +1,139 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Track Token · {{ token.number }}</title>
-  <style>
-    body { font-family: system-ui, Arial, sans-serif; margin:0; background:#0b1220; color:#eaf0ff; }
-    .wrap { max-width: 520px; margin: 0 auto; padding: 16px; }
-    .card { background:#111a2e; padding:16px; border-radius:14px; box-shadow: 0 6px 18px rgba(0,0,0,.25); margin-bottom:12px; }
-    .title { font-size: 18px; font-weight: 800; margin: 0; }
-    .muted { opacity:.75; }
-    .big { font-size: 44px; font-weight: 900; margin: 6px 0; }
-    .pill { display:inline-block; padding:6px 10px; border-radius:999px; background:#0d244a; font-weight:700; font-size:13px; }
-    a { color:#7fb0ff; text-decoration:none; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Track Token · {{ token.number }}</title>
+
+<style>
+:root {
+  --bg: #0b1220;
+  --card: #111a2e;
+  --primary: #2b6cff;
+  --success: #16a34a;
+  --text: #eaf0ff;
+  --muted: #9aa4bf;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto;
+  background: linear-gradient(180deg, #0b1220, #050912);
+  color: var(--text);
+}
+
+.container {
+  max-width: 480px;
+  margin: auto;
+  padding: 20px;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 18px;
+  padding: 18px;
+  margin-bottom: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+
+.label {
+  color: var(--muted);
+  font-size: 13px;
+  letter-spacing: .4px;
+}
+
+.big {
+  font-size: 44px;
+  font-weight: 800;
+  margin: 6px 0;
+}
+
+.status {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 13px;
+  background: var(--success);
+}
+
+.progress {
+  margin-top: 10px;
+  height: 8px;
+  background: #1d2745;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress > div {
+  height: 100%;
+  width: 0%;
+  background: var(--primary);
+  transition: width .3s ease;
+}
+
+.hint {
+  font-size: 14px;
+  color: var(--muted);
+  margin-top: 10px;
+}
+</style>
 </head>
+
 <body>
-  <div class="wrap">
-    <div class="card">
-      <p class="muted" style="margin:0;">Your token</p>
-      <div class="big" id="yourToken">{{ token.number }}</div>
-      <div class="pill" id="yourStatus">Status: {{ token.status }}</div>
-      <p class="muted" style="margin:10px 0 0 0;">Keep this page open. It refreshes every 10 seconds.</p>
-    </div>
+<div class="container">
 
-    <div class="card">
-      <p class="muted" style="margin:0;">Now serving</p>
-      <div class="big" id="nowServing">—</div>
-      <p class="muted" id="ahead">Tokens ahead: —</p>
-      <p class="muted" id="wait">Estimated wait: —</p>
-    </div>
+  <!-- Your Token -->
+  <div class="card">
+    <div class="label">Your Token</div>
+    <div class="big" id="yourToken">{{ token.number }}</div>
+    <span class="status" id="yourStatus">{{ token.status|title }}</span>
+    <div class="hint">This page updates automatically.</div>
+  </div>
 
-    <div class="card">
-      <p class="muted" style="margin:0;">Tip</p>
-      <p style="margin:8px 0 0 0;">When your token is near, come to the clinic to avoid waiting.</p>
-      <p style="margin:10px 0 0 0;"><a href="/public/clinic/main/">← Book another token</a></p>
+  <!-- Queue Status -->
+  <div class="card">
+    <div class="label">Now Serving</div>
+    <div class="big" id="nowServing">—</div>
+    <div class="hint" id="ahead">Tokens ahead: —</div>
+    <div class="hint" id="wait">Estimated wait: —</div>
+
+    <div class="progress">
+      <div id="progressBar"></div>
     </div>
   </div>
 
-  <script>
-    const tokenId = "{{ token.id }}";
-    const statusUrl = `/api/public/token/${tokenId}/status/`;
+  <!-- Guidance -->
+  <div class="card">
+    <div class="label">What to do</div>
+    <div class="hint">
+      Please arrive when your token is near to avoid waiting.
+    </div>
+  </div>
 
-    async function refreshStatus() {
-      try {
-        const res = await fetch(statusUrl);
-        const data = await res.json();
+</div>
 
-        if (!data.ok) return;
+<script>
+const tokenId = "{{ token.id }}";
+const url = `/api/public/token/${tokenId}/status/`;
 
-        document.getElementById("yourToken").textContent = data.your_token ?? "{{ token.number }}";
-        document.getElementById("yourStatus").textContent = `Status: ${data.your_status}`;
+async function refresh() {
+  const r = await fetch(url);
+  const d = await r.json();
+  if (!d.ok) return;
 
-        document.getElementById("nowServing").textContent = data.now_serving ?? "—";
-        document.getElementById("ahead").textContent = `Tokens ahead: ${data.tokens_ahead}`;
-        document.getElementById("wait").textContent = `Estimated wait: ${data.estimated_wait_minutes} min (approx)`;
-      } catch (e) {
-        // ignore
-      }
-    }
+  document.getElementById("yourToken").textContent = d.your_token;
+  document.getElementById("yourStatus").textContent = d.your_status.toUpperCase();
+  document.getElementById("nowServing").textContent = d.now_serving ?? "—";
+  document.getElementById("ahead").textContent = `Tokens ahead: ${d.tokens_ahead}`;
+  document.getElementById("wait").textContent = `Estimated wait: ${d.estimated_wait_minutes} min`;
 
-    refreshStatus();
-    setInterval(refreshStatus, 10000);
-  </script>
+  const progress = d.tokens_ahead === 0 ? 100 : Math.max(10, 100 - d.tokens_ahead * 15);
+  document.getElementById("progressBar").style.width = progress + "%";
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
 </body>
 </html>
