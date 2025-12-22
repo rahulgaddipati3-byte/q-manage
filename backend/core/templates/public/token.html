@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Track Token · {{ token.number }}</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin:0; background:#0b1220; color:#eaf0ff; }
+    .wrap { max-width: 520px; margin: 0 auto; padding: 16px; }
+    .card { background:#111a2e; padding:16px; border-radius:14px; box-shadow: 0 6px 18px rgba(0,0,0,.25); margin-bottom:12px; }
+    .title { font-size: 18px; font-weight: 800; margin: 0; }
+    .muted { opacity:.75; }
+    .big { font-size: 44px; font-weight: 900; margin: 6px 0; }
+    .pill { display:inline-block; padding:6px 10px; border-radius:999px; background:#0d244a; font-weight:700; font-size:13px; }
+    a { color:#7fb0ff; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <p class="muted" style="margin:0;">Your token</p>
+      <div class="big" id="yourToken">{{ token.number }}</div>
+      <div class="pill" id="yourStatus">Status: {{ token.status }}</div>
+      <p class="muted" style="margin:10px 0 0 0;">Keep this page open. It refreshes every 10 seconds.</p>
+    </div>
+
+    <div class="card">
+      <p class="muted" style="margin:0;">Now serving</p>
+      <div class="big" id="nowServing">—</div>
+      <p class="muted" id="ahead">Tokens ahead: —</p>
+      <p class="muted" id="wait">Estimated wait: —</p>
+    </div>
+
+    <div class="card">
+      <p class="muted" style="margin:0;">Tip</p>
+      <p style="margin:8px 0 0 0;">When your token is near, come to the clinic to avoid waiting.</p>
+      <p style="margin:10px 0 0 0;"><a href="/public/clinic/main/">← Book another token</a></p>
+    </div>
+  </div>
+
+  <script>
+    const tokenId = "{{ token.id }}";
+    const statusUrl = `/api/public/token/${tokenId}/status/`;
+
+    async function refreshStatus() {
+      try {
+        const res = await fetch(statusUrl);
+        const data = await res.json();
+
+        if (!data.ok) return;
+
+        document.getElementById("yourToken").textContent = data.your_token ?? "{{ token.number }}";
+        document.getElementById("yourStatus").textContent = `Status: ${data.your_status}`;
+
+        document.getElementById("nowServing").textContent = data.now_serving ?? "—";
+        document.getElementById("ahead").textContent = `Tokens ahead: ${data.tokens_ahead}`;
+        document.getElementById("wait").textContent = `Estimated wait: ${data.estimated_wait_minutes} min (approx)`;
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    refreshStatus();
+    setInterval(refreshStatus, 10000);
+  </script>
+</body>
+</html>
