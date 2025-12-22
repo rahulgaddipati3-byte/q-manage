@@ -55,6 +55,7 @@ urlpatterns = [
     # UI actions (POST)
     path("ui/issue/", views_ui.ui_issue_token, name="ui_issue_token"),
     path("ui/call-next/", views_ui.ui_call_next, name="ui_call_next"),
+    path("ui/requests/", views_reservations.staff_requests_page, name="ui_requests"),
 
     # -------------------------
     # Public customer flow (no login) (by clinic slug / token_id)

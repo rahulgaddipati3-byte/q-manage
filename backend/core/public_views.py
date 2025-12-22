@@ -1,6 +1,6 @@
+# backend/core/public_views.py
 import json
 import re
-from datetime import timedelta
 
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, render
@@ -10,7 +10,32 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .models import Token, ReservationRequest
 
+# Accept:
+#  - 10 digits: 9876543210
+#  - 12 digits starting 91: 919876543210
+#  - +91... with spaces
 PHONE_RE = re.compile(r"^\d{10}$|^91\d{10}$")
+
+
+def _normalize_phone(phone: str) -> str:
+    """Normalize to either 10 digits or 91XXXXXXXXXX (no +, no spaces)."""
+    if not phone:
+        return ""
+    p = phone.strip().replace(" ", "")
+    if p.startswith("+"):
+        p = p[1:]
+    # Keep digits only
+    p = re.sub(r"\D", "", p)
+
+    # If 10-digit, keep as is (your regex allows it)
+    if len(p) == 10:
+        return p
+
+    # If starts with 91 and 12 digits total
+    if len(p) == 12 and p.startswith("91"):
+        return p
+
+    return p
 
 
 # --------------------------------------------------
@@ -35,22 +60,34 @@ def public_clinic_snapshot(request, slug):
         .first()
     )
 
-    waiting = Token.objects.filter(service_date=service_date, status="active").count()
+    # Consider pending + active as "waiting in system"
+    pending_count = ReservationRequest.objects.filter(
+        service_date=service_date, status="pending"
+    ).count()
 
+    active_count = Token.objects.filter(service_date=service_date, status="active").count()
+
+    people_waiting = pending_count + active_count
+
+    # Simple estimate (tune later)
     avg_minutes = 5
-    est_wait = waiting * avg_minutes
+    estimated_wait_min = people_waiting * avg_minutes
 
     return JsonResponse({
         "ok": True,
         "clinic": slug,
         "now_serving": last_used.number if last_used else None,
-        "waiting_count": waiting,
-        "estimated_wait_minutes": est_wait,
+        "people_waiting": people_waiting,
+        "estimated_wait_min": estimated_wait_min,
+        # keep extra fields too (useful for debugging/UI)
+        "pending_requests": pending_count,
+        "active_tokens": active_count,
     })
 
 
 # --------------------------------------------------
 # Public: reserve token (creates ReservationRequest)
+# POST JSON: {"name":"..","phone":".."}
 # --------------------------------------------------
 @csrf_exempt
 @require_POST
@@ -61,7 +98,7 @@ def public_reserve_token(request, slug):
         return HttpResponseBadRequest("Invalid JSON")
 
     name = (payload.get("name") or "").strip()
-    phone = (payload.get("phone") or "").strip().replace(" ", "")
+    phone = _normalize_phone(payload.get("phone") or "")
 
     if not name:
         return JsonResponse({"ok": False, "error": "Name is required"}, status=400)
@@ -108,9 +145,7 @@ def public_request_status(request, request_id):
     token_url = f"/public/token/{req.token.id}/" if req.token else None
 
     scheduled = (
-        timezone.localtime(req.scheduled_time)
-        .strftime("%I:%M %p")
-        .lstrip("0")
+        timezone.localtime(req.scheduled_time).strftime("%I:%M %p").lstrip("0")
         if req.scheduled_time else None
     )
 
@@ -130,16 +165,16 @@ def public_request_status(request, request_id):
 def public_token_page(request, token_id):
     token = get_object_or_404(Token, id=token_id)
     return render(request, "public/token.html", {"token": token})
+
+
 # --------------------------------------------------
 # Public: token live status API (USED BY token.html)
 # --------------------------------------------------
 @require_GET
 def public_token_status(request, token_id):
     token = get_object_or_404(Token, id=token_id)
-
     service_date = token.service_date
 
-    # Last served token today
     last_used = (
         Token.objects
         .filter(service_date=service_date, status="used")
@@ -147,7 +182,7 @@ def public_token_status(request, token_id):
         .first()
     )
 
-    # Tokens ahead of this token
+    # Tokens ahead: active tokens with smaller sequence (same day)
     ahead = Token.objects.filter(
         service_date=service_date,
         status="active",

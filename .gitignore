@@ -40,3 +40,5 @@ media/
 # Docker / runtime
 # --------------------
 *.pid
+__pycache__/
+*.pyc

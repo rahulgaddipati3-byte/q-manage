@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Pending Requests</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 18px; }
+    table { width:100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border:1px solid #ddd; padding:10px; text-align:left; }
+    th { background:#f6f6f6; }
+    button { padding:8px 10px; cursor:pointer; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    input { padding:8px; }
+    .msg { margin-top: 10px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h2>Pending Reservation Requests</h2>
+
+  <div class="row">
+    <button onclick="loadPending()">Refresh</button>
+    <a href="/ui/counter/" style="margin-left:10px;">Back to Counter</a>
+  </div>
+
+  <div id="msg" class="msg"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Phone</th>
+        <th>Requested at</th>
+        <th>Minutes from now</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+<script>
+function setMsg(t){ document.getElementById("msg").textContent = t || ""; }
+
+async function loadPending(){
+  setMsg("Loading…");
+  const res = await fetch("/api/staff/requests/pending/");
+  const j = await res.json();
+  if(!j.ok){ setMsg("Failed to load"); return; }
+
+  const tbody = document.getElementById("rows");
+  tbody.innerHTML = "";
+  (j.pending || []).forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${r.id}</td>
+      <td>${r.name}</td>
+      <td>${r.phone}</td>
+      <td>${r.created_at}</td>
+      <td><input id="m_${r.id}" value="20" style="width:90px"/></td>
+      <td>
+        <button onclick="approve(${r.id})">Approve</button>
+        <button onclick="rejectReq(${r.id})">Reject</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  setMsg(`Pending: ${(j.pending||[]).length}`);
+}
+
+async function approve(id){
+  const minutes = parseInt(document.getElementById(`m_${id}`).value || "20", 10);
+  const res = await fetch(`/api/staff/requests/${id}/approve/`, {
+    method:"POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ minutes_from_now: minutes })
+  });
+  const j = await res.json();
+  if(!res.ok || !j.ok){
+    setMsg(j.error || "Approve failed");
+    return;
+  }
+  setMsg(`Approved. Token ${j.token_number} at ${j.scheduled_time} | SMS: ${j.sms_sent}`);
+  loadPending();
+}
+
+async function rejectReq(id){
+  const res = await fetch(`/api/staff/requests/${id}/reject/`, { method:"POST" });
+  const j = await res.json();
+  if(!res.ok || !j.ok){
+    setMsg(j.error || "Reject failed");
+    return;
+  }
+  setMsg("Rejected.");
+  loadPending();
+}
+
+loadPending();
+</script>
+</body>
+</html>
