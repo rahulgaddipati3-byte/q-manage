@@ -20,7 +20,6 @@ STATUS_ACTIVE = "active"
 STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
-# Accept 10-digit OR 91XXXXXXXXXX (country code without +)
 PHONE_RE = re.compile(r"^\d{10}$|^91\d{10}$")
 
 
@@ -42,19 +41,20 @@ def _normalize_phone(phone: str) -> str:
     return re.sub(r"\D", "", p)
 
 
+def _json_error(message: str, *, status: int = 400, detail: str | None = None):
+    payload = {"ok": False, "error": message}
+    if detail:
+        payload["detail"] = detail
+    return JsonResponse(payload, status=status)
+
+
 def _default_counter():
     """
     Return first active counter.
-    If none exist (common in fresh production DB), auto-seed one so public booking works.
-    This is the fastest demo-safe behavior.
+    IMPORTANT: Do NOT auto-create here unless you know Counter required fields.
+    In production, auto-create often fails due to NOT NULL constraints.
     """
-    c = Counter.objects.filter(is_active=True).order_by("code").first()
-    if c:
-        return c
-
-    # Auto seed a default counter (demo-saver)
-    # NOTE: if your Counter model requires additional fields, add them here.
-    return Counter.objects.create(code="c1", is_active=True)
+    return Counter.objects.filter(is_active=True).order_by("code").first()
 
 
 def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
@@ -108,18 +108,15 @@ def _read_payload(request):
     """
     ctype = (request.content_type or "").lower()
 
-    # JSON
     if "application/json" in ctype:
         try:
             return json.loads((request.body or b"{}").decode("utf-8"))
         except Exception:
             return None
 
-    # Form POST / x-www-form-urlencoded / multipart/form-data
     if request.POST:
         return request.POST
 
-    # Fallback: try JSON anyway
     try:
         return json.loads((request.body or b"{}").decode("utf-8"))
     except Exception:
@@ -164,42 +161,41 @@ def public_clinic_snapshot(request, slug):
 
 # ---------------------------
 # Public reserve -> auto issue token
-# Accepts JSON or Form POST
 # ---------------------------
 @csrf_exempt
 @require_POST
 def public_reserve_token(request, slug):
     payload = _read_payload(request)
     if payload is None:
-        return JsonResponse({"ok": False, "error": "Invalid request payload"}, status=400)
+        return _json_error("Invalid request payload", status=400)
 
-    # Support both keys: phone OR mobile (your UI shows "Mobile")
     name = (payload.get("name") or "").strip()
     phone_raw = payload.get("phone") or payload.get("mobile") or ""
     phone = _normalize_phone(phone_raw)
     address = (payload.get("address") or "").strip()
 
     if not name:
-        return JsonResponse({"ok": False, "error": "Name is required"}, status=400)
+        return _json_error("Name is required", status=400)
 
     if not phone or not PHONE_RE.match(phone):
-        return JsonResponse(
-            {"ok": False, "error": "Enter valid 10-digit mobile (or 91XXXXXXXXXX)"},
-            status=400,
-        )
+        return _json_error("Enter valid 10-digit mobile (or 91XXXXXXXXXX)", status=400)
 
-    # assign to first active counter; auto-seeds if missing
-    try:
-        counter = _default_counter()
-    except Exception as e:
-        return JsonResponse({"ok": False, "error": "Counter setup error", "detail": str(e)}, status=500)
+    counter = _default_counter()
+    if counter is None:
+        # This is the REAL production blocker for you right now.
+        # Show a clear message so demo doesn't look broken.
+        return _json_error(
+            "System not configured: no active counters.",
+            status=500,
+            detail="Create at least one Counter with is_active=True in production DB."
+        )
 
     try:
         token = _issue_token_for_today(counter=counter, name=name, phone=phone, address=address)
     except IntegrityError:
-        return JsonResponse({"ok": False, "error": "Could not reserve token. Try again."}, status=409)
+        return _json_error("Could not reserve token. Try again.", status=409)
     except Exception as e:
-        return JsonResponse({"ok": False, "error": "Internal error", "detail": str(e)}, status=500)
+        return _json_error("Internal error", status=500, detail=str(e))
 
     return JsonResponse({
         "ok": True,
