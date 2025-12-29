@@ -8,10 +8,10 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction, IntegrityError
-from django.db.models import Max, IntegerField
-from django.db.models.functions import Substr, Cast
+from django.db.models import Max
 
-from .models import Token
+from .models import Token, Counter
+
 
 # -------------------------
 # Token numbering
@@ -39,6 +39,7 @@ def _dt(v):
 
 
 def _normalize_phone(phone: str) -> str:
+    """Normalize to digits only. Keeps 10-digit or 91XXXXXXXXXX formats."""
     if not phone:
         return ""
     p = phone.strip().replace(" ", "")
@@ -48,28 +49,32 @@ def _normalize_phone(phone: str) -> str:
     return p
 
 
-def _issue_token_for_today(counter=None) -> Token:
+def _get_default_counter():
     """
-    Creates an ACTIVE token for today.
-    counter=None means "unassigned" (public reserve).
+    Public reserve must be visible on staff screen.
+    So assign to the first active counter (A1 typically).
+    """
+    return Counter.objects.filter(is_active=True).order_by("code").first()
+
+
+def _issue_token_for_today(counter: Counter) -> Token:
+    """
+    Creates an ACTIVE token for today and assigns it to a counter
+    so it appears on staff queue for that counter.
     Safe against collisions via retry on IntegrityError.
     """
+    if counter is None:
+        raise ValueError("No active counter available")
+
     service_date = timezone.localdate()
-    prefix_len = len(TOKEN_PREFIX)
 
     for _ in range(10):
         try:
             with transaction.atomic():
-                qs = Token.objects.filter(service_date=service_date)
+                qs = Token.objects.select_for_update().filter(service_date=service_date)
 
                 last_seq = qs.aggregate(m=Max("sequence"))["m"] or 0
-                last_num = (
-                    qs.filter(number__startswith=TOKEN_PREFIX)
-                    .annotate(num=Cast(Substr("number", prefix_len + 1), IntegerField()))
-                    .aggregate(m=Max("num"))["m"]
-                ) or 0
-
-                next_seq = max(int(last_seq), int(last_num)) + 1
+                next_seq = int(last_seq) + 1
                 number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
 
                 token = Token.objects.create(
@@ -147,9 +152,13 @@ def public_reserve_token(request, slug):
             status=400,
         )
 
-    # IMPORTANT: we create a Token directly (unassigned)
+    # Assign to an active counter so it shows on staff screen
+    counter = _get_default_counter()
+    if not counter:
+        return JsonResponse({"ok": False, "error": "No counters available. Create counters first."}, status=500)
+
     try:
-        token = _issue_token_for_today(counter=None)
+        token = _issue_token_for_today(counter=counter)
     except IntegrityError:
         return JsonResponse({"ok": False, "error": "Could not reserve token. Try again."}, status=409)
 
@@ -160,6 +169,7 @@ def public_reserve_token(request, slug):
         "track_url": f"/public/token/{token.id}/",
         "service_date": str(token.service_date),
         "status": token.status,
+        "counter": counter.code,
     })
 
 
