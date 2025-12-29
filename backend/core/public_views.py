@@ -5,7 +5,7 @@ import re
 from django.db import transaction, IntegrityError
 from django.db.models import Max, IntegerField
 from django.db.models.functions import Substr, Cast
-from django.http import JsonResponse, HttpResponseBadRequest
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -20,6 +20,7 @@ STATUS_ACTIVE = "active"
 STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
+# Accept 10-digit OR 91XXXXXXXXXX (country code without +)
 PHONE_RE = re.compile(r"^\d{10}$|^91\d{10}$")
 
 
@@ -35,7 +36,7 @@ def _dt(v):
 def _normalize_phone(phone: str) -> str:
     if not phone:
         return ""
-    p = phone.strip().replace(" ", "")
+    p = str(phone).strip().replace(" ", "")
     if p.startswith("+"):
         p = p[1:]
     return re.sub(r"\D", "", p)
@@ -49,6 +50,10 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
     """
     Create ACTIVE token for today with collision-safe retry.
     """
+    if counter is None:
+        # Hard guard to avoid TypeError later
+        raise ValueError("No active counter available")
+
     service_date = timezone.localdate()
     prefix_len = len(TOKEN_PREFIX)
 
@@ -82,6 +87,33 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
             continue
 
     raise IntegrityError("Could not issue token after retries")
+
+
+def _read_payload(request):
+    """
+    Accept BOTH:
+    - JSON body: {"name": "...", "phone"/"mobile": "...", "address": "..."}
+    - Form POST (FormData): name, phone/mobile, address
+    Returns dict payload.
+    """
+    ctype = (request.content_type or "").lower()
+
+    # JSON
+    if "application/json" in ctype:
+        try:
+            return json.loads((request.body or b"{}").decode("utf-8"))
+        except Exception:
+            return None
+
+    # Form POST / x-www-form-urlencoded / multipart/form-data
+    if request.POST:
+        return request.POST
+
+    # Fallback: try JSON anyway
+    try:
+        return json.loads((request.body or b"{}").decode("utf-8"))
+    except Exception:
+        return None
 
 
 # ---------------------------
@@ -122,18 +154,20 @@ def public_clinic_snapshot(request, slug):
 
 # ---------------------------
 # Public reserve -> auto issue token
-# POST JSON: {"name": "...", "phone": "...", "address": "..."}
+# Accepts JSON or Form POST
 # ---------------------------
 @csrf_exempt
 @require_POST
 def public_reserve_token(request, slug):
-    try:
-        payload = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        return HttpResponseBadRequest("Invalid JSON")
+    payload = _read_payload(request)
+    if payload is None:
+        # IMPORTANT: never return HTML/text here
+        return JsonResponse({"ok": False, "error": "Invalid request payload"}, status=400)
 
+    # Support both keys: phone OR mobile (your UI shows "Mobile")
     name = (payload.get("name") or "").strip()
-    phone = _normalize_phone(payload.get("phone") or "")
+    phone_raw = payload.get("phone") or payload.get("mobile") or ""
+    phone = _normalize_phone(phone_raw)
     address = (payload.get("address") or "").strip()
 
     if not name:
@@ -145,12 +179,22 @@ def public_reserve_token(request, slug):
             status=400,
         )
 
-    counter = _default_counter()  # ✅ assign to first active counter so it shows on staff display
+    counter = _default_counter()  # assign to first active counter
+
+    if counter is None:
+        # Prevent TypeError/HTML error page when no counters exist in prod DB
+        return JsonResponse(
+            {"ok": False, "error": "No active counters configured. Please contact clinic/admin."},
+            status=500,
+        )
 
     try:
         token = _issue_token_for_today(counter=counter, name=name, phone=phone, address=address)
     except IntegrityError:
         return JsonResponse({"ok": False, "error": "Could not reserve token. Try again."}, status=409)
+    except Exception as e:
+        # Last-resort safety: never leak HTML error page to frontend
+        return JsonResponse({"ok": False, "error": "Internal error", "detail": str(e)}, status=500)
 
     return JsonResponse({
         "ok": True,
