@@ -11,7 +11,16 @@
     h2 { margin:0 0 6px 0; }
     .muted { color: rgba(255,255,255,.7); }
     label { display:block; margin: 10px 0 6px; }
-    input { width:100%; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:#0b1220; color:#fff; }
+    input, textarea {
+      width:100%;
+      padding:12px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.12);
+      background:#0b1220;
+      color:#fff;
+      box-sizing:border-box;
+    }
+    textarea { min-height: 72px; resize: vertical; }
     button { width:100%; padding:14px; border:0; border-radius:14px; background:#2f6df6; color:#fff; font-size:16px; cursor:pointer; margin-top:12px; }
     .err { color:#ffb4b4; white-space:pre-wrap; }
     .ok { color:#a7ffb1; white-space:pre-wrap; }
@@ -38,6 +47,9 @@
 
       <label for="phone"><b>Mobile</b></label>
       <input id="phone" placeholder="10-digit mobile (or 91XXXXXXXXXX)" autocomplete="tel" />
+
+      <label for="address"><b>Address</b></label>
+      <textarea id="address" placeholder="House/Street/Area (optional but recommended)" autocomplete="street-address"></textarea>
 
       <button type="button" onclick="reserve()">Reserve Token</button>
 
@@ -66,8 +78,9 @@ async function getSnapshot(){
 
     document.getElementById("nowServing").textContent = j.now_serving || "—";
 
-    const waitMin = (j.estimated_wait_minutes ?? 0);
-    const waiting = (j.waiting_count ?? 0);
+    // ✅ FIX: match API field names returned by public_clinic_snapshot()
+    const waitMin = (j.estimated_wait_min ?? 0);
+    const waiting = (j.people_waiting ?? 0);
 
     document.getElementById("stats").textContent =
       `Estimated wait: ${waitMin} min (approx) • People waiting: ${waiting}`;
@@ -80,6 +93,7 @@ async function reserve(){
   const name = document.getElementById("name").value.trim();
   const phoneRaw = document.getElementById("phone").value.trim();
   const phone = digitsOnly(phoneRaw);
+  const address = document.getElementById("address").value.trim();
 
   if(!name){ setMsg("Name is required", false); return; }
   if(!phone){ setMsg("Mobile is required", false); return; }
@@ -88,7 +102,7 @@ async function reserve(){
     const res = await fetch(`/api/public/clinic/${clinicSlug}/reserve/`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ name, phone })
+      body: JSON.stringify({ name, phone, address })
     });
 
     const txt = await res.text();
@@ -100,7 +114,10 @@ async function reserve(){
       return;
     }
 
-    setMsg(`Request submitted ✅\nRedirecting to tracking page...`, true);
+    // j.track_url should be /public/token/<id>/
+    const tokenTxt = j.token_number ? `\nYour Token: ${j.token_number}` : "";
+    setMsg(`Token reserved ✅${tokenTxt}\nRedirecting to tracking page...`, true);
+
     window.location.href = j.track_url;
   }catch(e){
     setMsg("Network error. Please try again.", false);
