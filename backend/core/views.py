@@ -24,14 +24,11 @@ STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
 
-# -------------------------
-# Helpers
-# -------------------------
 def _json_load(request):
     try:
         raw = request.body.decode("utf-8") if request.body else ""
         return json.loads(raw or "{}")
-    except Exception:
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None
 
 
@@ -45,13 +42,12 @@ def _dt(v):
 
 
 def _is_expired(token) -> bool:
-    # If expires_at exists, enforce expiry. If not, treat as never expiring.
     if hasattr(token, "expires_at") and token.expires_at:
         return timezone.now() >= token.expires_at
     return False
 
 
-def _mark_expired_if_needed(token) -> bool:
+def _mark_expired_if_needed(token):
     if token.status == STATUS_ACTIVE and _is_expired(token):
         token.status = STATUS_EXPIRED
         token.save(update_fields=["status"])
@@ -59,10 +55,6 @@ def _mark_expired_if_needed(token) -> bool:
     return False
 
 
-# -------------------------
-# API: Token status (GET)
-# /api/token/status/<number>/
-# -------------------------
 @require_GET
 def token_status(request, number):
     number = str(number).strip()
@@ -86,11 +78,6 @@ def token_status(request, number):
     })
 
 
-# -------------------------
-# API: Consume token (POST) -> marks USED
-# /api/token/consume/
-# Body: {"number":"A001"}
-# -------------------------
 @csrf_exempt
 def consume_token(request):
     if request.method != "POST":
@@ -134,11 +121,6 @@ def consume_token(request):
     })
 
 
-# -------------------------
-# API: Issue token (POST)
-# /api/token/issue/
-# Body: {"counter":"A1"} optional
-# -------------------------
 @csrf_exempt
 def issue_token(request):
     if request.method != "POST":
@@ -152,7 +134,10 @@ def issue_token(request):
 
     counter = None
     if counter_code:
-        counter, _ = Counter.objects.get_or_create(code=counter_code, defaults={"name": counter_code})
+        counter, _ = Counter.objects.get_or_create(
+            code=counter_code,
+            defaults={"name": counter_code}
+        )
         if not counter.is_active:
             return JsonResponse({"ok": False, "error": "Counter not active"}, status=400)
 
@@ -197,12 +182,6 @@ def issue_token(request):
     return JsonResponse({"ok": False, "error": "Could not issue token"}, status=409)
 
 
-# -------------------------
-# API: Next token (POST)
-# /api/token/next/
-# Body: {"counter":"A1"}
-# Does NOT mark used. Just returns and assigns counter if needed.
-# -------------------------
 @csrf_exempt
 def next_token(request):
     if request.method != "POST":
@@ -224,47 +203,41 @@ def next_token(request):
     today = timezone.localdate()
 
     with transaction.atomic():
-        # 1) First serve tokens already assigned to this counter (oldest)
+        # 1) Public reserved tokens (unassigned) - TODAY ONLY
         token = (
             Token.objects.select_for_update()
-            .filter(service_date=today, status=STATUS_ACTIVE, counter=counter)
+            .filter(service_date=today, status=STATUS_ACTIVE, counter__isnull=True)
             .order_by("created_at", "id")
             .first()
         )
 
-        # 2) Else take unassigned active token for today and assign it
+        # 2) Otherwise tokens already assigned to this counter - TODAY ONLY
         if not token:
-            token = (
-                Token.objects.select_for_update()
-                .filter(service_date=today, status=STATUS_ACTIVE, counter__isnull=True)
-                .order_by("created_at", "id")
-                .first()
-            )
-            if token:
-                token.counter = counter
-                token.save(update_fields=["counter"])
-
-        # Expire and retry (only if expires_at exists)
-        while token and _is_expired(token):
-            token.status = STATUS_EXPIRED
-            token.save(update_fields=["status"])
             token = (
                 Token.objects.select_for_update()
                 .filter(service_date=today, status=STATUS_ACTIVE, counter=counter)
                 .order_by("created_at", "id")
                 .first()
-            ) or (
+            )
+
+        # expire loop (optional)
+        while token and _is_expired(token):
+            token.status = STATUS_EXPIRED
+            token.save(update_fields=["status"])
+            token = (
                 Token.objects.select_for_update()
                 .filter(service_date=today, status=STATUS_ACTIVE, counter__isnull=True)
                 .order_by("created_at", "id")
                 .first()
             )
-            if token and token.counter_id is None:
-                token.counter = counter
-                token.save(update_fields=["counter"])
 
         if not token:
             return JsonResponse({"ok": False, "error": "No active tokens"}, status=404)
+
+        # Assign to this counter if it was unassigned
+        if token.counter_id is None:
+            token.counter = counter
+            token.save(update_fields=["counter"])
 
     return JsonResponse({
         "ok": True,
@@ -274,10 +247,6 @@ def next_token(request):
     })
 
 
-# -------------------------
-# API: Queue status (GET)
-# /api/queue/status/?counter=A1
-# -------------------------
 @require_GET
 def queue_status(request):
     code = request.GET.get("counter")
@@ -291,23 +260,19 @@ def queue_status(request):
 
     today = timezone.localdate()
 
-    assigned = Token.objects.filter(service_date=today, status=STATUS_ACTIVE, counter=counter)
     unassigned = Token.objects.filter(service_date=today, status=STATUS_ACTIVE, counter__isnull=True)
+    assigned = Token.objects.filter(service_date=today, status=STATUS_ACTIVE, counter=counter)
 
-    next_tok = assigned.order_by("created_at", "id").first() or unassigned.order_by("created_at", "id").first()
+    next_tok = unassigned.order_by("created_at", "id").first() or assigned.order_by("created_at", "id").first()
 
     return JsonResponse({
         "ok": True,
         "counter": counter.code,
-        "waiting_total": assigned.count() + unassigned.count(),
+        "waiting_total": unassigned.count() + assigned.count(),
         "next_token": next_tok.number if next_tok else None,
     })
 
 
-# -------------------------
-# UI: Custom Admin Dashboard
-# /admin-dashboard/
-# -------------------------
 @login_required
 def admin_dashboard(request):
     if not request.user.is_staff:

@@ -7,54 +7,83 @@ from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
-
 from django.db import transaction, IntegrityError
-from django.db.models import Max
+from django.db.models import Max, IntegerField
+from django.db.models.functions import Substr, Cast
 
-from .models import Token, ReservationRequest
+from .models import Token
+
+# -------------------------
+# Token numbering
+# -------------------------
+TOKEN_PREFIX = "A"
+TOKEN_PAD = 3
+
+STATUS_ACTIVE = "active"
+STATUS_USED = "used"
+STATUS_EXPIRED = "expired"
 
 # Accept:
 #  - 10 digits: 9876543210
 #  - 12 digits starting 91: 919876543210
-#  - +91... with spaces
 PHONE_RE = re.compile(r"^\d{10}$|^91\d{10}$")
 
 
+def _dt(v):
+    if not v:
+        return None
+    try:
+        return v.isoformat()
+    except Exception:
+        return str(v)
+
+
 def _normalize_phone(phone: str) -> str:
-    """Normalize to either 10 digits or 91XXXXXXXXXX (no +, no spaces)."""
     if not phone:
         return ""
     p = phone.strip().replace(" ", "")
     if p.startswith("+"):
         p = p[1:]
-    # Keep digits only
     p = re.sub(r"\D", "", p)
-
-    # If 10-digit, keep as is
-    if len(p) == 10:
-        return p
-
-    # If starts with 91 and 12 digits total
-    if len(p) == 12 and p.startswith("91"):
-        return p
-
     return p
 
 
-def _next_token_number(service_date):
+def _issue_token_for_today(counter=None) -> Token:
     """
-    Generates next A001, A002... per day across ALL counters.
-    Uses Token.sequence (unique per day).
+    Creates an ACTIVE token for today.
+    counter=None means "unassigned" (public reserve).
+    Safe against collisions via retry on IntegrityError.
     """
-    last_seq = (
-        Token.objects
-        .filter(service_date=service_date)
-        .aggregate(m=Max("sequence"))["m"]
-        or 0
-    )
-    next_seq = last_seq + 1
-    number = f"A{next_seq:03d}"  # A001, A002...
-    return next_seq, number
+    service_date = timezone.localdate()
+    prefix_len = len(TOKEN_PREFIX)
+
+    for _ in range(10):
+        try:
+            with transaction.atomic():
+                qs = Token.objects.filter(service_date=service_date)
+
+                last_seq = qs.aggregate(m=Max("sequence"))["m"] or 0
+                last_num = (
+                    qs.filter(number__startswith=TOKEN_PREFIX)
+                    .annotate(num=Cast(Substr("number", prefix_len + 1), IntegerField()))
+                    .aggregate(m=Max("num"))["m"]
+                ) or 0
+
+                next_seq = max(int(last_seq), int(last_num)) + 1
+                number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
+
+                token = Token.objects.create(
+                    counter=counter,
+                    service_date=service_date,
+                    sequence=next_seq,
+                    number=number,
+                    status=STATUS_ACTIVE,
+                )
+                return token
+        except IntegrityError:
+            continue
+
+    raise IntegrityError("Could not issue token after retries")
 
 
 # --------------------------------------------------
@@ -74,15 +103,13 @@ def public_clinic_snapshot(request, slug):
 
     last_used = (
         Token.objects
-        .filter(service_date=service_date, status="used")
+        .filter(service_date=service_date, status=STATUS_USED)
         .order_by("-used_at", "-id")
         .first()
     )
 
-    # People waiting = active tokens only (since reserve now creates token directly)
-    active_count = Token.objects.filter(service_date=service_date, status="active").count()
+    active_count = Token.objects.filter(service_date=service_date, status=STATUS_ACTIVE).count()
 
-    # Simple estimate (tune later)
     avg_minutes = 5
     estimated_wait_min = active_count * avg_minutes
 
@@ -97,9 +124,7 @@ def public_clinic_snapshot(request, slug):
 
 
 # --------------------------------------------------
-# Public: reserve token
-# NOW: creates Token immediately (ACTIVE, counter=None)
-# and creates ReservationRequest (approved) linked to token
+# Public: reserve token (AUTO issues Token immediately)
 # POST JSON: {"name":"..","phone":".."}
 # --------------------------------------------------
 @csrf_exempt
@@ -122,81 +147,24 @@ def public_reserve_token(request, slug):
             status=400,
         )
 
-    service_date = timezone.localdate()
-
-    # Create token immediately (ACTIVE, unassigned counter)
-    for _ in range(10):
-        try:
-            with transaction.atomic():
-                seq, number = _next_token_number(service_date)
-
-                token = Token.objects.create(
-                    counter=None,  # IMPORTANT: unassigned, so staff Call Next can pick it
-                    service_date=service_date,
-                    sequence=seq,
-                    number=number,
-                    status="active",
-                )
-
-                req = ReservationRequest.objects.create(
-                    service_date=service_date,
-                    status="approved",         # since token is issued immediately
-                    name=name,
-                    phone=phone,
-                    token=token,               # OneToOne link
-                    decided_at=timezone.now(), # optional but exists in your model
-                )
-
-            return JsonResponse({
-                "ok": True,
-                "request_id": req.id,
-                "token_id": token.id,
-                "token_number": token.number,
-                "track_url": f"/public/request/{req.id}/",
-                "token_track_url": f"/public/token/{token.id}/",
-            })
-
-        except IntegrityError:
-            continue
-
-    return JsonResponse({"ok": False, "error": "Could not reserve token (conflict)"}, status=409)
-
-
-# --------------------------------------------------
-# Public: reservation tracking page
-# --------------------------------------------------
-@require_GET
-def public_request_page(request, request_id):
-    req = get_object_or_404(ReservationRequest, id=request_id)
-    return render(request, "public/request.html", {"req": req})
-
-
-# --------------------------------------------------
-# Public: reservation status API (polling)
-# --------------------------------------------------
-@require_GET
-def public_request_status(request, request_id):
-    req = get_object_or_404(ReservationRequest, id=request_id)
-
-    token_number = req.token.number if req.token else None
-    token_url = f"/public/token/{req.token.id}/" if req.token else None
-
-    scheduled = (
-        timezone.localtime(req.scheduled_time).strftime("%I:%M %p").lstrip("0")
-        if req.scheduled_time else None
-    )
+    # IMPORTANT: we create a Token directly (unassigned)
+    try:
+        token = _issue_token_for_today(counter=None)
+    except IntegrityError:
+        return JsonResponse({"ok": False, "error": "Could not reserve token. Try again."}, status=409)
 
     return JsonResponse({
         "ok": True,
-        "status": req.status,
-        "token_number": token_number,
-        "scheduled_time_display": scheduled,
-        "token_track_url": token_url,
+        "token_id": token.id,
+        "token_number": token.number,
+        "track_url": f"/public/token/{token.id}/",
+        "service_date": str(token.service_date),
+        "status": token.status,
     })
 
 
 # --------------------------------------------------
-# Public: token tracking page (REQUIRED by urls.py)
+# Public: token tracking page
 # --------------------------------------------------
 @require_GET
 def public_token_page(request, token_id):
@@ -214,15 +182,14 @@ def public_token_status(request, token_id):
 
     last_used = (
         Token.objects
-        .filter(service_date=service_date, status="used")
+        .filter(service_date=service_date, status=STATUS_USED)
         .order_by("-used_at", "-id")
         .first()
     )
 
-    # Tokens ahead: active tokens with smaller sequence (same day)
     ahead = Token.objects.filter(
         service_date=service_date,
-        status="active",
+        status=STATUS_ACTIVE,
         sequence__lt=token.sequence
     ).count()
 
@@ -237,4 +204,6 @@ def public_token_status(request, token_id):
         "tokens_ahead": ahead,
         "estimated_wait_minutes": est_wait,
         "service_date": str(service_date),
+        "created_at": _dt(getattr(token, "created_at", None)),
+        "counter": token.counter.code if token.counter else None,
     })
