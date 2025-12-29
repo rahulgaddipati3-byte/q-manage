@@ -8,6 +8,9 @@ from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 
+from django.db import transaction, IntegrityError
+from django.db.models import Max
+
 from .models import Token, ReservationRequest
 
 # Accept:
@@ -27,7 +30,7 @@ def _normalize_phone(phone: str) -> str:
     # Keep digits only
     p = re.sub(r"\D", "", p)
 
-    # If 10-digit, keep as is (your regex allows it)
+    # If 10-digit, keep as is
     if len(p) == 10:
         return p
 
@@ -36,6 +39,22 @@ def _normalize_phone(phone: str) -> str:
         return p
 
     return p
+
+
+def _next_token_number(service_date):
+    """
+    Generates next A001, A002... per day across ALL counters.
+    Uses Token.sequence (unique per day).
+    """
+    last_seq = (
+        Token.objects
+        .filter(service_date=service_date)
+        .aggregate(m=Max("sequence"))["m"]
+        or 0
+    )
+    next_seq = last_seq + 1
+    number = f"A{next_seq:03d}"  # A001, A002...
+    return next_seq, number
 
 
 # --------------------------------------------------
@@ -60,33 +79,27 @@ def public_clinic_snapshot(request, slug):
         .first()
     )
 
-    # Consider pending + active as "waiting in system"
-    pending_count = ReservationRequest.objects.filter(
-        service_date=service_date, status="pending"
-    ).count()
-
+    # People waiting = active tokens only (since reserve now creates token directly)
     active_count = Token.objects.filter(service_date=service_date, status="active").count()
-
-    people_waiting = pending_count + active_count
 
     # Simple estimate (tune later)
     avg_minutes = 5
-    estimated_wait_min = people_waiting * avg_minutes
+    estimated_wait_min = active_count * avg_minutes
 
     return JsonResponse({
         "ok": True,
         "clinic": slug,
         "now_serving": last_used.number if last_used else None,
-        "people_waiting": people_waiting,
+        "people_waiting": active_count,
         "estimated_wait_min": estimated_wait_min,
-        # keep extra fields too (useful for debugging/UI)
-        "pending_requests": pending_count,
         "active_tokens": active_count,
     })
 
 
 # --------------------------------------------------
-# Public: reserve token (creates ReservationRequest)
+# Public: reserve token
+# NOW: creates Token immediately (ACTIVE, counter=None)
+# and creates ReservationRequest (approved) linked to token
 # POST JSON: {"name":"..","phone":".."}
 # --------------------------------------------------
 @csrf_exempt
@@ -111,18 +124,42 @@ def public_reserve_token(request, slug):
 
     service_date = timezone.localdate()
 
-    req = ReservationRequest.objects.create(
-        service_date=service_date,
-        status="pending",
-        name=name,
-        phone=phone,
-    )
+    # Create token immediately (ACTIVE, unassigned counter)
+    for _ in range(10):
+        try:
+            with transaction.atomic():
+                seq, number = _next_token_number(service_date)
 
-    return JsonResponse({
-        "ok": True,
-        "request_id": req.id,
-        "track_url": f"/public/request/{req.id}/",
-    })
+                token = Token.objects.create(
+                    counter=None,  # IMPORTANT: unassigned, so staff Call Next can pick it
+                    service_date=service_date,
+                    sequence=seq,
+                    number=number,
+                    status="active",
+                )
+
+                req = ReservationRequest.objects.create(
+                    service_date=service_date,
+                    status="approved",         # since token is issued immediately
+                    name=name,
+                    phone=phone,
+                    token=token,               # OneToOne link
+                    decided_at=timezone.now(), # optional but exists in your model
+                )
+
+            return JsonResponse({
+                "ok": True,
+                "request_id": req.id,
+                "token_id": token.id,
+                "token_number": token.number,
+                "track_url": f"/public/request/{req.id}/",
+                "token_track_url": f"/public/token/{token.id}/",
+            })
+
+        except IntegrityError:
+            continue
+
+    return JsonResponse({"ok": False, "error": "Could not reserve token (conflict)"}, status=409)
 
 
 # --------------------------------------------------
