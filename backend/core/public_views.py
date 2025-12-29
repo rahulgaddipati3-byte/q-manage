@@ -48,21 +48,52 @@ def _normalize_phone(phone):
     return re.sub(r"\D", "", p)
 
 
+def _token_field_names():
+    # model field names only (safe)
+    return {f.name for f in Token._meta.get_fields() if hasattr(f, "attname")}
+
+
+def _build_customer_kwargs(name, phone, address):
+    """
+    Detect which customer/patient fields exist in Token model and return kwargs.
+    This avoids 'unexpected keyword argument' crashes across environments.
+    """
+    fields = _token_field_names()
+
+    candidates = [
+        ("customer_name", "customer_phone", "customer_address"),
+        ("patient_name", "patient_phone", "patient_address"),
+        ("client_name", "client_phone", "client_address"),
+        ("name", "phone", "address"),
+    ]
+
+    for fn, fp, fa in candidates:
+        if fn in fields or fp in fields or fa in fields:
+            kwargs = {}
+            if fn in fields:
+                kwargs[fn] = name
+            if fp in fields:
+                kwargs[fp] = phone
+            if fa in fields:
+                kwargs[fa] = address
+            return kwargs
+
+    # If none of the typical fields exist, don't pass any of these (still allow token issue)
+    return {}
+
+
 def _default_counter():
-    # first active counter
     return Counter.objects.filter(is_active=True).order_by("code").first()
 
 
-def _issue_token_for_today(*, counter, name, phone, address):
-    """
-    Create ACTIVE token for today with collision-safe retry.
-    Works with Token fields: name, phone, address.
-    """
+def _issue_token_for_today(*, counter, name, phone, address) -> Token:
     if not counter:
         raise ValueError("No active counter")
 
     service_date = timezone.localdate()
     prefix_len = len(TOKEN_PREFIX)
+
+    cust_kwargs = _build_customer_kwargs(name, phone, address)
 
     for _ in range(10):
         try:
@@ -85,11 +116,7 @@ def _issue_token_for_today(*, counter, name, phone, address):
                     sequence=next_seq,
                     number=number,
                     status=STATUS_ACTIVE,
-
-                    # ✅ IMPORTANT: match your Token model fields
-                    name=name,
-                    phone=phone,
-                    address=address,
+                    **cust_kwargs,
                 )
                 return token
         except IntegrityError:
@@ -192,7 +219,7 @@ def public_token_page(request, token_id):
 
 
 # ---------------------------
-# Public token status API (REQUIRED by urls.py)
+# Public token status API
 # ---------------------------
 @require_GET
 def public_token_status(request, token_id):
@@ -224,9 +251,4 @@ def public_token_status(request, token_id):
         "service_date": str(service_date),
         "created_at": _dt(getattr(token, "created_at", None)),
         "counter": token.counter.code if token.counter else None,
-
-        # optional patient data if needed by UI
-        "name": getattr(token, "name", None),
-        "phone": getattr(token, "phone", None),
-        "address": getattr(token, "address", None),
     })
