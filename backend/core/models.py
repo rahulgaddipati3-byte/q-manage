@@ -29,7 +29,7 @@ class Token(models.Model):
 
     counter = models.ForeignKey(Counter, null=True, blank=True, on_delete=models.SET_NULL)
 
-    number = models.CharField(max_length=20)  # <-- REMOVE unique=True
+    number = models.CharField(max_length=20)  # NOT unique; unique per (service_date, number)
     service_date = models.DateField(db_index=True)
     sequence = models.PositiveIntegerField(db_index=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
@@ -42,6 +42,14 @@ class Token(models.Model):
             models.UniqueConstraint(fields=["service_date", "number"], name="uniq_token_number_per_day"),
             models.UniqueConstraint(fields=["service_date", "sequence"], name="uniq_token_seq_per_day"),
         ]
+
+    def is_expired(self) -> bool:
+        return bool(self.expires_at and timezone.now() >= self.expires_at)
+
+    def __str__(self):
+        return self.number
+
+
 class ReservationRequest(models.Model):
     STATUS_CHOICES = (
         ("pending", "Pending"),
@@ -62,7 +70,7 @@ class ReservationRequest(models.Model):
     # Token created only after approval
     token = models.OneToOneField(Token, null=True, blank=True, on_delete=models.SET_NULL)
 
-    # SMS status
+    # SMS status (or WhatsApp)
     sms_sent = models.BooleanField(default=False)
     sms_error = models.TextField(blank=True, default="")
 
@@ -70,11 +78,4 @@ class ReservationRequest(models.Model):
     decided_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"Req {self.id} ({self.status})"
-
-    def is_expired(self):
-        return bool(self.expires_at and timezone.now() >= self.expires_at)
-
-    def __str__(self):
-        return self.number
-
+        return f"Req {self.id} ({self.status}) - {self.name}"
