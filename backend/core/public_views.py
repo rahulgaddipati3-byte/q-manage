@@ -43,7 +43,18 @@ def _normalize_phone(phone: str) -> str:
 
 
 def _default_counter():
-    return Counter.objects.filter(is_active=True).order_by("code").first()
+    """
+    Return first active counter.
+    If none exist (common in fresh production DB), auto-seed one so public booking works.
+    This is the fastest demo-safe behavior.
+    """
+    c = Counter.objects.filter(is_active=True).order_by("code").first()
+    if c:
+        return c
+
+    # Auto seed a default counter (demo-saver)
+    # NOTE: if your Counter model requires additional fields, add them here.
+    return Counter.objects.create(code="c1", is_active=True)
 
 
 def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
@@ -51,7 +62,6 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
     Create ACTIVE token for today with collision-safe retry.
     """
     if counter is None:
-        # Hard guard to avoid TypeError later
         raise ValueError("No active counter available")
 
     service_date = timezone.localdate()
@@ -94,7 +104,7 @@ def _read_payload(request):
     Accept BOTH:
     - JSON body: {"name": "...", "phone"/"mobile": "...", "address": "..."}
     - Form POST (FormData): name, phone/mobile, address
-    Returns dict payload.
+    Returns dict-like payload.
     """
     ctype = (request.content_type or "").lower()
 
@@ -161,7 +171,6 @@ def public_clinic_snapshot(request, slug):
 def public_reserve_token(request, slug):
     payload = _read_payload(request)
     if payload is None:
-        # IMPORTANT: never return HTML/text here
         return JsonResponse({"ok": False, "error": "Invalid request payload"}, status=400)
 
     # Support both keys: phone OR mobile (your UI shows "Mobile")
@@ -179,21 +188,17 @@ def public_reserve_token(request, slug):
             status=400,
         )
 
-    counter = _default_counter()  # assign to first active counter
-
-    if counter is None:
-        # Prevent TypeError/HTML error page when no counters exist in prod DB
-        return JsonResponse(
-            {"ok": False, "error": "No active counters configured. Please contact clinic/admin."},
-            status=500,
-        )
+    # assign to first active counter; auto-seeds if missing
+    try:
+        counter = _default_counter()
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": "Counter setup error", "detail": str(e)}, status=500)
 
     try:
         token = _issue_token_for_today(counter=counter, name=name, phone=phone, address=address)
     except IntegrityError:
         return JsonResponse({"ok": False, "error": "Could not reserve token. Try again."}, status=409)
     except Exception as e:
-        # Last-resort safety: never leak HTML error page to frontend
         return JsonResponse({"ok": False, "error": "Internal error", "detail": str(e)}, status=500)
 
     return JsonResponse({
