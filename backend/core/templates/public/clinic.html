@@ -13,8 +13,8 @@
     label { display:block; margin: 10px 0 6px; }
     input { width:100%; padding:12px; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:#0b1220; color:#fff; }
     button { width:100%; padding:14px; border:0; border-radius:14px; background:#2f6df6; color:#fff; font-size:16px; cursor:pointer; margin-top:12px; }
-    .err { color:#ffb4b4; white-space:pre-wrap; word-break:break-word; }
-    .ok { color:#a7ffb1; white-space:pre-wrap; word-break:break-word; }
+    .err { color:#ffb4b4; white-space:pre-wrap; }
+    .ok { color:#a7ffb1; white-space:pre-wrap; }
     a { color:#9bbcff; }
   </style>
 </head>
@@ -34,12 +34,12 @@
 
     <div class="card">
       <label for="name"><b>Name</b></label>
-      <input id="name" placeholder="Your name" />
+      <input id="name" placeholder="Your name" autocomplete="name" />
 
       <label for="phone"><b>Mobile</b></label>
-      <input id="phone" placeholder="10-digit mobile (or 91XXXXXXXXXX)" inputmode="numeric" />
+      <input id="phone" placeholder="10-digit mobile (or 91XXXXXXXXXX)" autocomplete="tel" />
 
-      <button onclick="reserve()">Reserve Token</button>
+      <button type="button" onclick="reserve()">Reserve Token</button>
 
       <div style="margin-top:10px" id="msg" class="muted"></div>
       <div class="muted" style="margin-top:10px">This page refreshes automatically every 10 seconds.</div>
@@ -55,31 +55,31 @@ function setMsg(text, ok=true){
   el.textContent = text;
 }
 
+function digitsOnly(s){
+  return (s || "").replace(/\D/g, "");
+}
+
 async function getSnapshot(){
   try{
-    const res = await fetch(`/api/public/clinic/${clinicSlug}/snapshot/`);
+    const res = await fetch(`/api/public/clinic/${clinicSlug}/snapshot/`, { cache: "no-store" });
     const j = await res.json();
-
-    if (!res.ok || !j.ok) throw new Error(j.error || "snapshot failed");
 
     document.getElementById("nowServing").textContent = j.now_serving || "—";
 
-    // ✅ correct keys
+    const waitMin = (j.estimated_wait_minutes ?? 0);
+    const waiting = (j.waiting_count ?? 0);
+
     document.getElementById("stats").textContent =
-      `Estimated wait: ${j.estimated_wait_minutes} min (approx) • People waiting: ${j.waiting_count}`;
+      `Estimated wait: ${waitMin} min (approx) • People waiting: ${waiting}`;
   }catch(e){
     document.getElementById("stats").textContent = "Could not load snapshot";
   }
 }
 
-function digitsOnly(s){
-  return (s || "").replace(/[^\d]/g, "");
-}
-
 async function reserve(){
   const name = document.getElementById("name").value.trim();
   const phoneRaw = document.getElementById("phone").value.trim();
-  const phone = digitsOnly(phoneRaw); // ✅ removes hyphen etc
+  const phone = digitsOnly(phoneRaw);
 
   if(!name){ setMsg("Name is required", false); return; }
   if(!phone){ setMsg("Mobile is required", false); return; }
@@ -100,7 +100,7 @@ async function reserve(){
       return;
     }
 
-    setMsg(`Request submitted ✅\nRedirecting…`, true);
+    setMsg(`Request submitted ✅\nRedirecting to tracking page...`, true);
     window.location.href = j.track_url;
   }catch(e){
     setMsg("Network error. Please try again.", false);
