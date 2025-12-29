@@ -60,17 +60,12 @@ class ReservationRequest(models.Model):
     service_date = models.DateField(db_index=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="pending")
 
-    # Required from customer
     name = models.CharField(max_length=120)
-    phone = models.CharField(max_length=15)  # store 10-digit or 91XXXXXXXXXX
+    phone = models.CharField(max_length=15)
 
-    # Staff confirms this time
     scheduled_time = models.DateTimeField(null=True, blank=True)
-
-    # Token created only after approval
     token = models.OneToOneField(Token, null=True, blank=True, on_delete=models.SET_NULL)
 
-    # SMS status (or WhatsApp)
     sms_sent = models.BooleanField(default=False)
     sms_error = models.TextField(blank=True, default="")
 
@@ -78,4 +73,4 @@ class ReservationRequest(models.Model):
     decided_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"Req {self.id} ({self.status}) - {self.name}"
+        return f"Req #{self.id} - {self.name} ({self.status})"
