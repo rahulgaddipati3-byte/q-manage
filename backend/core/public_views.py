@@ -3,6 +3,7 @@ import json
 import re
 
 from django.db import transaction, IntegrityError
+from django.db import models
 from django.db.models import Max, IntegerField
 from django.db.models.functions import Substr, Cast
 from django.http import JsonResponse
@@ -20,6 +21,7 @@ STATUS_ACTIVE = "active"
 STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
+# Accept 10-digit OR 91XXXXXXXXXX (country code without +)
 PHONE_RE = re.compile(r"^\d{10}$|^91\d{10}$")
 
 
@@ -48,35 +50,108 @@ def _json_error(message: str, *, status: int = 400, detail: str | None = None):
     return JsonResponse(payload, status=status)
 
 
+def _read_payload(request):
+    """
+    Accept BOTH:
+    - JSON body: {"name": "...", "phone"/"mobile": "...", "address": "..."}
+    - Form POST (FormData): name, phone/mobile, address
+    Returns dict-like payload.
+    """
+    ctype = (request.content_type or "").lower()
+
+    if "application/json" in ctype:
+        try:
+            return json.loads((request.body or b"{}").decode("utf-8"))
+        except Exception:
+            return None
+
+    if request.POST:
+        return request.POST
+
+    try:
+        return json.loads((request.body or b"{}").decode("utf-8"))
+    except Exception:
+        return None
+
+
 def _default_counter():
     """
-    Return first active counter. If none exist, try to auto-seed one.
-    This avoids Render shell/admin dependency.
-    Returns: (counter_or_none, error_detail_or_none)
+    Returns (counter_or_none, error_detail_or_none)
+
+    - If an active counter exists => return it
+    - Else => attempt to create a default counter "c1" using smart defaults
+      for required (NOT NULL, no default) fields.
+    - If Counter has a REQUIRED ForeignKey or other complex required field,
+      creation may still fail; in that case error_detail contains the exact reason.
     """
+    # 1) existing active
     c = Counter.objects.filter(is_active=True).order_by("code").first()
     if c:
         return c, None
 
-    # Try to create a default counter safely.
-    # Add defaults for common optional fields if they exist.
-    defaults = {"is_active": True}
-
-    # If your Counter model has any of these, we set a safe default.
-    # NOTE: This uses model meta to avoid hasattr() mistakes.
-    field_names = {f.name for f in Counter._meta.get_fields() if hasattr(f, "name")}
-    for fname in ("name", "title", "display_name", "label"):
-        if fname in field_names:
-            defaults[fname] = "Counter 1"
+    # 2) smart defaults for required fields
+    defaults: dict[str, object] = {"is_active": True}
 
     try:
+        for f in Counter._meta.fields:
+            # skip PK/auto fields
+            if getattr(f, "primary_key", False):
+                continue
+            if isinstance(f, (models.AutoField, models.BigAutoField)):
+                continue
+
+            fname = f.name
+
+            # code will be provided in get_or_create(code="c1")
+            if fname == "code":
+                continue
+
+            # if already provided, skip
+            if fname in defaults:
+                continue
+
+            # fill only required: NOT NULL + no default
+            has_default = f.default is not models.NOT_PROVIDED
+            if f.null or has_default:
+                continue
+
+            # if choices exist, choose first option
+            if getattr(f, "choices", None):
+                try:
+                    defaults[fname] = f.choices[0][0]
+                    continue
+                except Exception:
+                    pass
+
+            # fill by field type
+            if isinstance(f, (models.CharField, models.TextField, models.SlugField)):
+                defaults[fname] = "Counter 1"
+            elif isinstance(f, (models.IntegerField, models.BigIntegerField, models.SmallIntegerField)):
+                defaults[fname] = 1
+            elif isinstance(f, models.BooleanField):
+                defaults[fname] = True
+            elif isinstance(f, models.DateTimeField):
+                defaults[fname] = timezone.now()
+            elif isinstance(f, models.DateField):
+                defaults[fname] = timezone.localdate()
+            elif isinstance(f, models.TimeField):
+                defaults[fname] = timezone.localtime().time()
+            elif isinstance(f, models.ForeignKey):
+                # Cannot safely guess a required FK target without knowing the model.
+                # Let it fail with a clear error detail; we'll fix based on the exception text.
+                pass
+
+        # create or fetch
         c, _ = Counter.objects.get_or_create(code="c1", defaults=defaults)
-        if not getattr(c, "is_active", True):
+
+        # ensure active
+        if hasattr(c, "is_active") and not c.is_active:
             c.is_active = True
             c.save(update_fields=["is_active"])
+
         return c, None
+
     except Exception as e:
-        # Return the real reason (NOT NULL constraint etc.)
         return None, str(e)
 
 
@@ -120,30 +195,6 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
             continue
 
     raise IntegrityError("Could not issue token after retries")
-
-
-def _read_payload(request):
-    """
-    Accept BOTH:
-    - JSON body: {"name": "...", "phone"/"mobile": "...", "address": "..."}
-    - Form POST (FormData): name, phone/mobile, address
-    Returns dict-like payload.
-    """
-    ctype = (request.content_type or "").lower()
-
-    if "application/json" in ctype:
-        try:
-            return json.loads((request.body or b"{}").decode("utf-8"))
-        except Exception:
-            return None
-
-    if request.POST:
-        return request.POST
-
-    try:
-        return json.loads((request.body or b"{}").decode("utf-8"))
-    except Exception:
-        return None
 
 
 # ---------------------------
