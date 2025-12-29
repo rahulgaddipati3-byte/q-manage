@@ -7,14 +7,15 @@ from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
+
 from django.db import transaction, IntegrityError
-from django.db.models import Max
+from django.db.models import Max, IntegerField
+from django.db.models.functions import Substr, Cast
 
 from .models import Token, Counter
 
-
 # -------------------------
-# Token numbering
+# Token numbering (Option 2 style: A001, A002 per day across all counters)
 # -------------------------
 TOKEN_PREFIX = "A"
 TOKEN_PAD = 3
@@ -23,9 +24,6 @@ STATUS_ACTIVE = "active"
 STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
-# Accept:
-#  - 10 digits: 9876543210
-#  - 12 digits starting 91: 919876543210
 PHONE_RE = re.compile(r"^\d{10}$|^91\d{10}$")
 
 
@@ -39,7 +37,6 @@ def _dt(v):
 
 
 def _normalize_phone(phone: str) -> str:
-    """Normalize to digits only. Keeps 10-digit or 91XXXXXXXXXX formats."""
     if not phone:
         return ""
     p = phone.strip().replace(" ", "")
@@ -50,23 +47,17 @@ def _normalize_phone(phone: str) -> str:
 
 
 def _get_default_counter():
-    """
-    Public reserve must be visible on staff screen.
-    So assign to the first active counter (A1 typically).
-    """
+    # Assign to the first active counter so staff screens see it immediately
     return Counter.objects.filter(is_active=True).order_by("code").first()
 
 
-def _issue_token_for_today(counter: Counter) -> Token:
+def _issue_token_for_today(counter=None) -> Token:
     """
-    Creates an ACTIVE token for today and assigns it to a counter
-    so it appears on staff queue for that counter.
+    Creates an ACTIVE token for today.
     Safe against collisions via retry on IntegrityError.
     """
-    if counter is None:
-        raise ValueError("No active counter available")
-
     service_date = timezone.localdate()
+    prefix_len = len(TOKEN_PREFIX)
 
     for _ in range(10):
         try:
@@ -74,11 +65,17 @@ def _issue_token_for_today(counter: Counter) -> Token:
                 qs = Token.objects.select_for_update().filter(service_date=service_date)
 
                 last_seq = qs.aggregate(m=Max("sequence"))["m"] or 0
-                next_seq = int(last_seq) + 1
+                last_num = (
+                    qs.filter(number__startswith=TOKEN_PREFIX)
+                    .annotate(num=Cast(Substr("number", prefix_len + 1), IntegerField()))
+                    .aggregate(m=Max("num"))["m"]
+                ) or 0
+
+                next_seq = max(int(last_seq), int(last_num)) + 1
                 number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
 
                 token = Token.objects.create(
-                    counter=counter,
+                    counter=counter,                 # IMPORTANT
                     service_date=service_date,
                     sequence=next_seq,
                     number=number,
@@ -152,13 +149,12 @@ def public_reserve_token(request, slug):
             status=400,
         )
 
-    # Assign to an active counter so it shows on staff screen
-    counter = _get_default_counter()
-    if not counter:
-        return JsonResponse({"ok": False, "error": "No counters available. Create counters first."}, status=500)
+    default_counter = _get_default_counter()
+    if not default_counter:
+        return JsonResponse({"ok": False, "error": "No active counters configured."}, status=400)
 
     try:
-        token = _issue_token_for_today(counter=counter)
+        token = _issue_token_for_today(counter=default_counter)
     except IntegrityError:
         return JsonResponse({"ok": False, "error": "Could not reserve token. Try again."}, status=409)
 
@@ -166,10 +162,10 @@ def public_reserve_token(request, slug):
         "ok": True,
         "token_id": token.id,
         "token_number": token.number,
+        "counter": default_counter.code,
         "track_url": f"/public/token/{token.id}/",
         "service_date": str(token.service_date),
         "status": token.status,
-        "counter": counter.code,
     })
 
 
