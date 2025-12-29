@@ -50,11 +50,34 @@ def _json_error(message: str, *, status: int = 400, detail: str | None = None):
 
 def _default_counter():
     """
-    Return first active counter.
-    IMPORTANT: Do NOT auto-create here unless you know Counter required fields.
-    In production, auto-create often fails due to NOT NULL constraints.
+    Return first active counter. If none exist, try to auto-seed one.
+    This avoids Render shell/admin dependency.
+    Returns: (counter_or_none, error_detail_or_none)
     """
-    return Counter.objects.filter(is_active=True).order_by("code").first()
+    c = Counter.objects.filter(is_active=True).order_by("code").first()
+    if c:
+        return c, None
+
+    # Try to create a default counter safely.
+    # Add defaults for common optional fields if they exist.
+    defaults = {"is_active": True}
+
+    # If your Counter model has any of these, we set a safe default.
+    # NOTE: This uses model meta to avoid hasattr() mistakes.
+    field_names = {f.name for f in Counter._meta.get_fields() if hasattr(f, "name")}
+    for fname in ("name", "title", "display_name", "label"):
+        if fname in field_names:
+            defaults[fname] = "Counter 1"
+
+    try:
+        c, _ = Counter.objects.get_or_create(code="c1", defaults=defaults)
+        if not getattr(c, "is_active", True):
+            c.is_active = True
+            c.save(update_fields=["is_active"])
+        return c, None
+    except Exception as e:
+        # Return the real reason (NOT NULL constraint etc.)
+        return None, str(e)
 
 
 def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
@@ -180,14 +203,12 @@ def public_reserve_token(request, slug):
     if not phone or not PHONE_RE.match(phone):
         return _json_error("Enter valid 10-digit mobile (or 91XXXXXXXXXX)", status=400)
 
-    counter = _default_counter()
+    counter, counter_err = _default_counter()
     if counter is None:
-        # This is the REAL production blocker for you right now.
-        # Show a clear message so demo doesn't look broken.
         return _json_error(
-            "System not configured: no active counters.",
+            "System not configured: could not create/find an active counter.",
             status=500,
-            detail="Create at least one Counter with is_active=True in production DB."
+            detail=counter_err or "No active counter found."
         )
 
     try:
