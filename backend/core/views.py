@@ -1,21 +1,20 @@
 # backend/core/views.py
 import json
-from django.http import JsonResponse
-from django.utils import timezone
-from django.db import transaction, IntegrityError
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_GET
-from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
 
-from django.db.models import (
-    Max, IntegerField, Count, Avg, F,
-    ExpressionWrapper, DurationField, Q
-)
+from django.http import JsonResponse, HttpResponseBadRequest
+from django.shortcuts import render
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET, require_POST
+from django.db import transaction, IntegrityError
+from django.db.models import Max, IntegerField, Count
 from django.db.models.functions import Substr, Cast
 
 from .models import Token, Counter
 
+# -------------------------
+# Config (Option 2 numbering: A001 per day across ALL counters)
+# -------------------------
 TOKEN_PREFIX = "A"
 TOKEN_PAD = 3
 
@@ -24,132 +23,70 @@ STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
 
-def _json_load(request):
+def _json_body(request):
     try:
-        raw = request.body.decode("utf-8") if request.body else ""
-        return json.loads(raw or "{}")
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
+        return json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        return {}
 
 
 def _dt(v):
     if not v:
         return None
     try:
-        return v.isoformat()
+        return timezone.localtime(v).isoformat()
     except Exception:
-        return str(v)
-
-
-def _is_expired(token) -> bool:
-    if hasattr(token, "expires_at") and token.expires_at:
-        return timezone.now() >= token.expires_at
-    return False
-
-
-def _mark_expired_if_needed(token):
-    if token.status == STATUS_ACTIVE and _is_expired(token):
-        token.status = STATUS_EXPIRED
-        token.save(update_fields=["status"])
-        return True
-    return False
-
-
-@require_GET
-def token_status(request, number):
-    number = str(number).strip()
-    try:
-        token = Token.objects.get(number=number)
-    except Token.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "Token not found"}, status=404)
-
-    _mark_expired_if_needed(token)
-
-    return JsonResponse({
-        "ok": True,
-        "number": token.number,
-        "status": token.status,
-        "counter": token.counter.code if token.counter else None,
-        "service_date": _dt(getattr(token, "service_date", None)),
-        "sequence": getattr(token, "sequence", None),
-        "created_at": _dt(getattr(token, "created_at", None)),
-        "expires_at": _dt(getattr(token, "expires_at", None)),
-        "used_at": _dt(getattr(token, "used_at", None)),
-    })
-
-
-@csrf_exempt
-def consume_token(request):
-    if request.method != "POST":
-        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
-
-    body = _json_load(request)
-    if body is None:
-        return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
-
-    number = str(body.get("number", "")).strip()
-    if not number:
-        return JsonResponse({"ok": False, "error": "number is required"}, status=400)
-
-    with transaction.atomic():
         try:
-            token = Token.objects.select_for_update().get(number=number)
-        except Token.DoesNotExist:
-            return JsonResponse({"ok": False, "error": "Token not found"}, status=404)
-
-        _mark_expired_if_needed(token)
-
-        if token.status == STATUS_EXPIRED:
-            return JsonResponse({"ok": False, "error": "Token expired"}, status=400)
-        if token.status == STATUS_USED:
-            return JsonResponse({"ok": False, "error": "Token already used"}, status=400)
-        if token.status != STATUS_ACTIVE:
-            return JsonResponse({"ok": False, "error": f"Token not active (status={token.status})"}, status=400)
-
-        token.status = STATUS_USED
-        if hasattr(token, "used_at"):
-            token.used_at = timezone.now()
-            token.save(update_fields=["status", "used_at"])
-        else:
-            token.save(update_fields=["status"])
-
-    return JsonResponse({
-        "ok": True,
-        "message": "Token consumed",
-        "number": token.number,
-        "used_at": _dt(getattr(token, "used_at", None)),
-    })
+            return v.isoformat()
+        except Exception:
+            return str(v)
 
 
-@csrf_exempt
-def issue_token(request):
-    if request.method != "POST":
-        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
+def _model_has_field(model_cls, field_name: str) -> bool:
+    try:
+        return any(f.name == field_name for f in model_cls._meta.get_fields())
+    except Exception:
+        return False
 
-    body = _json_load(request)
-    if body is None:
-        return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
 
-    counter_code = str(body.get("counter", "")).strip()
+def _expire_if_needed(token: Token) -> bool:
+    """
+    If token has is_expired() and it's expired -> mark expired and return True.
+    Else return False.
+    """
+    try:
+        if hasattr(token, "is_expired") and callable(token.is_expired) and token.is_expired():
+            token.status = STATUS_EXPIRED
+            fields = ["status"]
+            if _model_has_field(Token, "expired_at"):
+                token.expired_at = timezone.now()
+                fields.append("expired_at")
+            token.save(update_fields=fields)
+            return True
+    except Exception:
+        # If is_expired() is buggy, we do NOT crash production queue.
+        return False
+    return False
 
-    counter = None
-    if counter_code:
-        counter, _ = Counter.objects.get_or_create(
-            code=counter_code,
-            defaults={"name": counter_code}
-        )
-        if not counter.is_active:
-            return JsonResponse({"ok": False, "error": "Counter not active"}, status=400)
 
+def _issue_token_for_today(counter=None) -> Token:
+    """
+    Creates an ACTIVE token for today.
+    counter=None means "unassigned/public".
+    Safe with retries in case unique constraints exist on number/sequence.
+    """
     service_date = timezone.localdate()
     prefix_len = len(TOKEN_PREFIX)
 
-    for _ in range(10):
+    for _ in range(15):
         try:
             with transaction.atomic():
-                qs = Token.objects.filter(service_date=service_date)
+                qs = Token.objects.select_for_update().filter(service_date=service_date)
 
+                # Prefer explicit integer sequence if available
                 last_seq = qs.aggregate(m=Max("sequence"))["m"] or 0
+
+                # Fallback parse from number (A001 -> 1)
                 last_num = (
                     qs.filter(number__startswith=TOKEN_PREFIX)
                     .annotate(num=Cast(Substr("number", prefix_len + 1), IntegerField()))
@@ -159,38 +96,30 @@ def issue_token(request):
                 next_seq = max(int(last_seq), int(last_num)) + 1
                 number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
 
-                token = Token.objects.create(
+                create_kwargs = dict(
                     counter=counter,
                     service_date=service_date,
                     sequence=next_seq,
                     number=number,
                     status=STATUS_ACTIVE,
                 )
-
-            return JsonResponse({
-                "ok": True,
-                "number": token.number,
-                "counter": token.counter.code if token.counter else None,
-                "sequence": token.sequence,
-                "status": token.status,
-                "created_at": _dt(getattr(token, "created_at", None)),
-            })
-
+                token = Token.objects.create(**create_kwargs)
+                return token
         except IntegrityError:
+            # collision on unique fields -> retry
             continue
 
-    return JsonResponse({"ok": False, "error": "Could not issue token"}, status=409)
+    raise IntegrityError("Could not issue token after retries")
 
 
+# ==========================================================
+# API: Issue token (staff / reception)
+# POST JSON: {"counter":"A1"}  (required)
+# ==========================================================
 @csrf_exempt
-def next_token(request):
-    if request.method != "POST":
-        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
-
-    body = _json_load(request)
-    if body is None:
-        return JsonResponse({"ok": False, "error": "Invalid JSON"}, status=400)
-
+@require_POST
+def issue_token(request):
+    body = _json_body(request)
     counter_code = str(body.get("counter", "")).strip()
     if not counter_code:
         return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
@@ -198,125 +127,305 @@ def next_token(request):
     try:
         counter = Counter.objects.get(code=counter_code, is_active=True)
     except Counter.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "Counter not found"}, status=404)
+        return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
 
-    today = timezone.localdate()
+    try:
+        token = _issue_token_for_today(counter=counter)
+    except IntegrityError:
+        return JsonResponse({"ok": False, "error": "Could not issue token. Try again."}, status=409)
+
+    return JsonResponse({
+        "ok": True,
+        "message": "Token issued",
+        "counter": counter.code,
+        "number": token.number,
+        "token_id": token.id,
+        "status": token.status,
+        "service_date": str(token.service_date),
+        "created_at": _dt(getattr(token, "created_at", None)),
+    })
+
+
+# ==========================================================
+# API: Next token (staff)
+# POST JSON: {"counter":"A1"}  (required)
+# Behavior:
+# 1) Serve oldest ACTIVE token assigned to that counter
+# 2) If none, pull oldest ACTIVE token where counter IS NULL (public reserve),
+#    assign it to this counter, then serve it
+# ==========================================================
+@csrf_exempt
+@require_POST
+def next_token(request):
+    body = _json_body(request)
+    counter_code = str(body.get("counter", "")).strip()
+    if not counter_code:
+        return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
+
+    try:
+        counter = Counter.objects.get(code=counter_code, is_active=True)
+    except Counter.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
 
     with transaction.atomic():
-        # 1) Public reserved tokens (unassigned) - TODAY ONLY
+        # 1) Counter-specific queue (oldest first)
         token = (
             Token.objects.select_for_update()
-            .filter(service_date=today, status=STATUS_ACTIVE, counter__isnull=True)
+            .filter(counter=counter, status=STATUS_ACTIVE)
             .order_by("created_at", "id")
             .first()
         )
 
-        # 2) Otherwise tokens already assigned to this counter - TODAY ONLY
-        if not token:
+        while token and _expire_if_needed(token):
             token = (
                 Token.objects.select_for_update()
-                .filter(service_date=today, status=STATUS_ACTIVE, counter=counter)
+                .filter(counter=counter, status=STATUS_ACTIVE)
                 .order_by("created_at", "id")
                 .first()
             )
 
-        # expire loop (optional)
-        while token and _is_expired(token):
-            token.status = STATUS_EXPIRED
-            token.save(update_fields=["status"])
+        # 2) If none, pull from public/unassigned queue
+        if not token:
             token = (
                 Token.objects.select_for_update()
-                .filter(service_date=today, status=STATUS_ACTIVE, counter__isnull=True)
+                .filter(counter__isnull=True, status=STATUS_ACTIVE)
                 .order_by("created_at", "id")
                 .first()
             )
+
+            while token and _expire_if_needed(token):
+                token = (
+                    Token.objects.select_for_update()
+                    .filter(counter__isnull=True, status=STATUS_ACTIVE)
+                    .order_by("created_at", "id")
+                    .first()
+                )
+
+            if token:
+                token.counter = counter
+                token.save(update_fields=["counter"])
 
         if not token:
             return JsonResponse({"ok": False, "error": "No active tokens"}, status=404)
 
-        # Assign to this counter if it was unassigned
-        if token.counter_id is None:
-            token.counter = counter
-            token.save(update_fields=["counter"])
+        token.status = STATUS_USED
+        if _model_has_field(Token, "used_at"):
+            token.used_at = timezone.now()
+
+        fields = ["status"]
+        if _model_has_field(Token, "used_at"):
+            fields.append("used_at")
+        token.save(update_fields=fields)
 
     return JsonResponse({
         "ok": True,
+        "message": "Next token called",
         "counter": counter.code,
         "number": token.number,
+        "token_id": token.id,
         "status": token.status,
+        "used_at": _dt(getattr(token, "used_at", None)),
     })
 
 
-@require_GET
-def queue_status(request):
-    code = request.GET.get("counter")
-    if not code:
-        return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
+# ==========================================================
+# API: Consume token directly
+# POST JSON: {"number":"A001"}  OR {"token_id": 123}
+# Marks USED (for reception/scan style flows)
+# ==========================================================
+@csrf_exempt
+@require_POST
+def consume_token(request):
+    body = _json_body(request)
+    number = str(body.get("number", "")).strip()
+    token_id = body.get("token_id", None)
 
-    try:
-        counter = Counter.objects.get(code=code, is_active=True)
-    except Counter.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "Counter not found"}, status=404)
+    if not number and not token_id:
+        return JsonResponse({"ok": False, "error": "number or token_id is required"}, status=400)
 
-    today = timezone.localdate()
+    with transaction.atomic():
+        qs = Token.objects.select_for_update()
 
-    unassigned = Token.objects.filter(service_date=today, status=STATUS_ACTIVE, counter__isnull=True)
-    assigned = Token.objects.filter(service_date=today, status=STATUS_ACTIVE, counter=counter)
+        if token_id:
+            try:
+                token = qs.get(id=int(token_id))
+            except (Token.DoesNotExist, ValueError, TypeError):
+                return JsonResponse({"ok": False, "error": "Token not found"}, status=404)
+        else:
+            try:
+                token = qs.get(number=number)
+            except Token.DoesNotExist:
+                return JsonResponse({"ok": False, "error": "Token not found"}, status=404)
 
-    next_tok = unassigned.order_by("created_at", "id").first() or assigned.order_by("created_at", "id").first()
+        if token.status == STATUS_USED:
+            return JsonResponse({
+                "ok": True,
+                "message": "Already used",
+                "number": token.number,
+                "status": token.status,
+                "used_at": _dt(getattr(token, "used_at", None)),
+            })
+
+        if token.status == STATUS_EXPIRED:
+            return JsonResponse({"ok": False, "error": "Token is expired"}, status=409)
+
+        # expire if needed
+        if _expire_if_needed(token):
+            return JsonResponse({"ok": False, "error": "Token is expired"}, status=409)
+
+        token.status = STATUS_USED
+        if _model_has_field(Token, "used_at"):
+            token.used_at = timezone.now()
+
+        fields = ["status"]
+        if _model_has_field(Token, "used_at"):
+            fields.append("used_at")
+        token.save(update_fields=fields)
 
     return JsonResponse({
         "ok": True,
-        "counter": counter.code,
-        "waiting_total": unassigned.count() + assigned.count(),
-        "next_token": next_tok.number if next_tok else None,
+        "message": "Consumed",
+        "number": token.number,
+        "token_id": token.id,
+        "status": token.status,
+        "used_at": _dt(getattr(token, "used_at", None)),
     })
 
 
-@login_required
-def admin_dashboard(request):
-    if not request.user.is_staff:
-        return redirect("/login/")
+# ==========================================================
+# API: Token status
+# GET /api/token/status/A001/
+# ==========================================================
+@require_GET
+def token_status(request, number):
+    try:
+        token = Token.objects.get(number=number)
+    except Token.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "Token not found"}, status=404)
 
-    today = timezone.localdate()
-    tokens = Token.objects.filter(service_date=today)
+    return JsonResponse({
+        "ok": True,
+        "number": token.number,
+        "status": token.status,
+        "service_date": str(token.service_date),
+        "counter": token.counter.code if token.counter else None,
+        "created_at": _dt(getattr(token, "created_at", None)),
+        "used_at": _dt(getattr(token, "used_at", None)),
+    })
 
-    issued = tokens.count()
-    served = tokens.filter(status=STATUS_USED).count()
-    waiting = tokens.filter(status=STATUS_ACTIVE).count()
 
-    avg_wait = None
-    if hasattr(Token, "used_at") and hasattr(Token, "created_at"):
-        avg_wait = (
-            tokens.filter(used_at__isnull=False)
-            .annotate(
-                wait=ExpressionWrapper(
-                    F("used_at") - F("created_at"),
-                    output_field=DurationField(),
-                )
+# ==========================================================
+# API: Queue status
+# GET /api/queue/status/?counter=A1  -> single counter stats
+# GET /api/queue/status/            -> all counters list + public waiting
+# ==========================================================
+@require_GET
+def queue_status(request):
+    service_date = timezone.localdate()
+    counter_code = str(request.GET.get("counter", "")).strip()
+
+    def _counter_stats(c: Counter):
+        active_qs = Token.objects.filter(
+            service_date=service_date,
+            status=STATUS_ACTIVE,
+            counter=c
+        ).order_by("created_at", "id")
+
+        waiting_count = active_qs.count()
+        next_tok = active_qs.first()
+
+        last_used = (
+            Token.objects.filter(
+                service_date=service_date,
+                status=STATUS_USED,
+                counter=c
             )
-            .aggregate(avg=Avg("wait"))["avg"]
+            .order_by("-used_at", "-id")
+            .first()
         )
 
-    per_counter = (
-        tokens.values("counter__code")
-        .annotate(
-            issued=Count("id"),
-            served=Count("id", filter=Q(status=STATUS_USED)),
-            waiting=Count("id", filter=Q(status=STATUS_ACTIVE)),
-        )
-        .order_by("counter__code")
+        return {
+            "code": c.code,
+            "name": c.name,
+            "now_serving": last_used.number if last_used else None,
+            "waiting_count": waiting_count,
+            "next_token": next_tok.number if next_tok else None,
+        }
+
+    # Single counter mode
+    if counter_code:
+        try:
+            c = Counter.objects.get(code=counter_code, is_active=True)
+        except Counter.DoesNotExist:
+            return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
+
+        stats = _counter_stats(c)
+
+        # Include public/unassigned waiting too (useful debug)
+        public_waiting = Token.objects.filter(
+            service_date=service_date,
+            status=STATUS_ACTIVE,
+            counter__isnull=True
+        ).count()
+
+        stats["public_waiting"] = public_waiting
+        stats["service_date"] = str(service_date)
+
+        return JsonResponse({"ok": True, **stats})
+
+    # All counters mode
+    counters = Counter.objects.filter(is_active=True).order_by("code")
+    rows = [_counter_stats(c) for c in counters]
+
+    public_waiting = Token.objects.filter(
+        service_date=service_date,
+        status=STATUS_ACTIVE,
+        counter__isnull=True
+    ).count()
+
+    return JsonResponse({
+        "ok": True,
+        "service_date": str(service_date),
+        "counters": rows,
+        "public_waiting": public_waiting,
+    })
+
+
+# ==========================================================
+# Custom Admin Dashboard (NOT Django admin)
+# /admin-dashboard/
+# ==========================================================
+@require_GET
+def admin_dashboard(request):
+    service_date = timezone.localdate()
+
+    totals = Token.objects.filter(service_date=service_date).aggregate(
+        total=Count("id"),
+        active=Count("id", filter=None),
     )
 
-    return render(
-        request,
-        "core/admin_dashboard.html",
-        {
-            "issued": issued,
-            "served": served,
-            "waiting": waiting,
-            "avg_wait": avg_wait,
-            "per_counter": per_counter,
-            "today": today,
-        },
-    )
+    total = Token.objects.filter(service_date=service_date).count()
+    active = Token.objects.filter(service_date=service_date, status=STATUS_ACTIVE).count()
+    used = Token.objects.filter(service_date=service_date, status=STATUS_USED).count()
+    expired = Token.objects.filter(service_date=service_date, status=STATUS_EXPIRED).count()
+    public_waiting = Token.objects.filter(service_date=service_date, status=STATUS_ACTIVE, counter__isnull=True).count()
+
+    counters = Counter.objects.filter(is_active=True).order_by("code")
+    per_counter = []
+    for c in counters:
+        per_counter.append({
+            "code": c.code,
+            "name": c.name,
+            "active": Token.objects.filter(service_date=service_date, status=STATUS_ACTIVE, counter=c).count(),
+            "used": Token.objects.filter(service_date=service_date, status=STATUS_USED, counter=c).count(),
+        })
+
+    return render(request, "core/admin_dashboard.html", {
+        "service_date": service_date,
+        "total": total,
+        "active": active,
+        "used": used,
+        "expired": expired,
+        "public_waiting": public_waiting,
+        "per_counter": per_counter,
+    })

@@ -7,7 +7,6 @@ from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
-
 from django.db import transaction, IntegrityError
 from django.db.models import Max, IntegerField
 from django.db.models.functions import Substr, Cast
@@ -15,7 +14,7 @@ from django.db.models.functions import Substr, Cast
 from .models import Token, Counter
 
 # -------------------------
-# Token numbering (Option 2 style: A001, A002 per day across all counters)
+# Token numbering (Option 2 style: A001 per day across all counters)
 # -------------------------
 TOKEN_PREFIX = "A"
 TOKEN_PAD = 3
@@ -24,6 +23,9 @@ STATUS_ACTIVE = "active"
 STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
+# Accept:
+#  - 10 digits: 9876543210
+#  - 12 digits starting 91: 919876543210
 PHONE_RE = re.compile(r"^\d{10}$|^91\d{10}$")
 
 
@@ -46,14 +48,20 @@ def _normalize_phone(phone: str) -> str:
     return p
 
 
-def _get_default_counter():
-    # Assign to the first active counter so staff screens see it immediately
-    return Counter.objects.filter(is_active=True).order_by("code").first()
-
-
-def _issue_token_for_today(counter=None) -> Token:
+def _pick_default_counter() -> Counter:
     """
-    Creates an ACTIVE token for today.
+    Picks the first active counter (A1 typically).
+    Change ordering if you want a specific default.
+    """
+    counter = Counter.objects.filter(is_active=True).order_by("code").first()
+    if not counter:
+        raise Counter.DoesNotExist("No active counters configured")
+    return counter
+
+
+def _issue_token_for_today(counter: Counter) -> Token:
+    """
+    Creates an ACTIVE token for today, assigned to `counter`.
     Safe against collisions via retry on IntegrityError.
     """
     service_date = timezone.localdate()
@@ -75,7 +83,7 @@ def _issue_token_for_today(counter=None) -> Token:
                 number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
 
                 token = Token.objects.create(
-                    counter=counter,                 # IMPORTANT
+                    counter=counter,
                     service_date=service_date,
                     sequence=next_seq,
                     number=number,
@@ -126,7 +134,7 @@ def public_clinic_snapshot(request, slug):
 
 
 # --------------------------------------------------
-# Public: reserve token (AUTO issues Token immediately)
+# Public: reserve token (AUTO issues Token immediately AND assigns to default counter)
 # POST JSON: {"name":"..","phone":".."}
 # --------------------------------------------------
 @csrf_exempt
@@ -149,12 +157,13 @@ def public_reserve_token(request, slug):
             status=400,
         )
 
-    default_counter = _get_default_counter()
-    if not default_counter:
-        return JsonResponse({"ok": False, "error": "No active counters configured."}, status=400)
+    try:
+        counter = _pick_default_counter()
+    except Counter.DoesNotExist:
+        return JsonResponse({"ok": False, "error": "No active counters configured. Please create counters."}, status=409)
 
     try:
-        token = _issue_token_for_today(counter=default_counter)
+        token = _issue_token_for_today(counter=counter)
     except IntegrityError:
         return JsonResponse({"ok": False, "error": "Could not reserve token. Try again."}, status=409)
 
@@ -162,7 +171,7 @@ def public_reserve_token(request, slug):
         "ok": True,
         "token_id": token.id,
         "token_number": token.number,
-        "counter": default_counter.code,
+        "assigned_counter": token.counter.code if token.counter else None,
         "track_url": f"/public/token/{token.id}/",
         "service_date": str(token.service_date),
         "status": token.status,
@@ -193,9 +202,11 @@ def public_token_status(request, token_id):
         .first()
     )
 
+    # tokens ahead on SAME counter (since now public reserves are assigned)
     ahead = Token.objects.filter(
         service_date=service_date,
         status=STATUS_ACTIVE,
+        counter=token.counter,
         sequence__lt=token.sequence
     ).count()
 
