@@ -66,6 +66,7 @@ def _read_payload(request):
     if request.POST:
         return request.POST
 
+    # fallback: try json
     try:
         return json.loads((request.body or b"{}").decode("utf-8"))
     except Exception:
@@ -76,35 +77,47 @@ def _default_counter():
     return Counter.objects.filter(is_active=True).order_by("code").first()
 
 
-def _token_field_names(model_cls):
+# ---------------------------
+# Dynamic Token field mapping
+# ---------------------------
+_TOKEN_FIELD_CACHE: set[str] | None = None
+
+
+def _token_field_names():
     """
-    Return a set of real DB field names for the model.
+    Cached set of real DB field names for Token model.
     """
+    global _TOKEN_FIELD_CACHE
+    if _TOKEN_FIELD_CACHE is not None:
+        return _TOKEN_FIELD_CACHE
+
     names = set()
-    for f in model_cls._meta.get_fields():
-        # concrete fields only
+    for f in Token._meta.get_fields():
         if getattr(f, "concrete", False):
             names.add(f.name)
+    _TOKEN_FIELD_CACHE = names
     return names
 
 
 def _set_first_existing_field(obj, candidates, value):
     """
-    Set the first candidate field that exists on obj's model.
+    Set first candidate field that exists on Token model.
     """
     if value is None:
-        return
-    field_names = _token_field_names(obj.__class__)
-    for name in candidates:
-        if name in field_names:
-            setattr(obj, name, value)
-            return
+        return False
+
+    field_names = _token_field_names()
+    for fname in candidates:
+        if fname in field_names:
+            setattr(obj, fname, value)
+            return True
+    return False
 
 
 def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
     """
     Create ACTIVE token for today with collision-safe retry.
-    Also stores customer details into whatever fields exist on your Token model.
+    Stores name/phone/address into whatever fields exist on your Token model.
     """
     if counter is None:
         raise ValueError("No active counter available")
@@ -127,7 +140,7 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
                 next_seq = max(int(last_seq), int(last_num)) + 1
                 number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
 
-                # Create with ONLY guaranteed fields
+                # Create with ONLY safe/known core fields
                 token = Token.objects.create(
                     counter=counter,
                     service_date=service_date,
@@ -136,25 +149,30 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
                     status=STATUS_ACTIVE,
                 )
 
-                # Now set details into whichever fields exist in YOUR Token model
-                _set_first_existing_field(
+                changed = False
+                changed |= _set_first_existing_field(
                     token,
                     ["customer_name", "patient_name", "name", "full_name"],
                     name,
                 )
-                _set_first_existing_field(
+                changed |= _set_first_existing_field(
                     token,
                     ["customer_phone", "patient_phone", "phone", "mobile"],
                     phone,
                 )
-                _set_first_existing_field(
+                changed |= _set_first_existing_field(
                     token,
                     ["customer_address", "patient_address", "address"],
                     address,
                 )
 
-                # Save only if we changed something
-                token.save()
+                if changed:
+                    token.save(update_fields=list(_token_field_names() & {
+                        "customer_name", "patient_name", "name", "full_name",
+                        "customer_phone", "patient_phone", "phone", "mobile",
+                        "customer_address", "patient_address", "address",
+                    }))
+
                 return token
 
         except IntegrityError:
@@ -274,7 +292,9 @@ def public_token_status(request, token_id):
     )
 
     ahead = Token.objects.filter(
-        service_date=service_date, status=STATUS_ACTIVE, sequence__lt=token.sequence
+        service_date=service_date,
+        status=STATUS_ACTIVE,
+        sequence__lt=token.sequence,
     ).count()
 
     avg_minutes = 5
