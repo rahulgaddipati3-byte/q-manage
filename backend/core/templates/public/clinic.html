@@ -7,194 +7,232 @@
 
   <style>
     :root{
-      --bg: #070b14;
-      --panel: rgba(255,255,255,0.06);
-      --panel2: rgba(255,255,255,0.08);
-      --border: rgba(255,255,255,0.12);
-      --text: rgba(255,255,255,0.92);
-      --muted: rgba(255,255,255,0.65);
-      --good: #22c55e;
-      --bad: #ef4444;
-      --brand: #2563eb;
-      --brand2: #1d4ed8;
-      --shadow: 0 18px 50px rgba(0,0,0,0.45);
+      --bg:#f4f7fb;
+      --card:#ffffff;
+      --border:#e6edf5;
+      --text:#0f172a;
+      --muted:#475569;
+      --brand:#0ea5e9;     /* hospital blue */
+      --brand2:#0284c7;
+      --ok:#16a34a;
+      --bad:#dc2626;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
       --r: 18px;
     }
-
-    * { box-sizing: border-box; }
+    *{box-sizing:border-box}
     body{
       margin:0;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      background: radial-gradient(1200px 600px at 30% -10%, rgba(37,99,235,0.25), transparent 55%),
-                  radial-gradient(900px 500px at 80% 0%, rgba(34,197,94,0.12), transparent 60%),
-                  var(--bg);
+      background: linear-gradient(180deg, #f7fbff, var(--bg));
       color: var(--text);
     }
 
-    .wrap{
-      max-width: 1020px;
-      margin: 0 auto;
-      padding: 26px 16px 60px;
-    }
-
     .topbar{
+      background: linear-gradient(90deg, #0ea5e9, #22c55e);
+      color:white;
+      padding: 16px 16px;
+    }
+    .topbarInner{
+      max-width: 1100px;
+      margin: 0 auto;
       display:flex;
       align-items:center;
       justify-content:space-between;
       gap:12px;
-      margin-bottom: 18px;
+    }
+    .brand{
+      display:flex; align-items:center; gap:12px;
+    }
+    .logo{
+      width:42px; height:42px; border-radius:12px;
+      background: rgba(255,255,255,0.18);
+      display:flex; align-items:center; justify-content:center;
+      font-weight:900;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.15) inset;
     }
     .title{
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: 0.2px;
+      font-size:18px; font-weight:800; letter-spacing:.2px; margin:0;
     }
-    .subtitle{
-      font-size: 13px;
-      color: var(--muted);
-      margin-top: 4px;
+    .sub{
+      font-size:13px; opacity:.92; margin-top:2px;
     }
-    .badge{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
+    .live{
+      display:flex; align-items:center; gap:8px;
       padding: 8px 12px;
-      border:1px solid var(--border);
-      background: var(--panel);
       border-radius: 999px;
-      font-size: 13px;
-      color: var(--muted);
-      white-space: nowrap;
+      background: rgba(255,255,255,0.18);
+      border: 1px solid rgba(255,255,255,0.25);
+      font-weight:700;
+      font-size:13px;
+      white-space:nowrap;
     }
     .dot{
-      width:10px; height:10px; border-radius:999px;
-      background: var(--good);
-      box-shadow: 0 0 0 4px rgba(34,197,94,0.12);
+      width:10px; height:10px; border-radius:999px; background:#22c55e;
+      box-shadow: 0 0 0 4px rgba(34,197,94,0.25);
+    }
+
+    .wrap{
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 18px 16px 48px;
     }
 
     .grid{
       display:grid;
       grid-template-columns: 1fr;
-      gap: 14px;
+      gap: 16px;
     }
-    @media (min-width: 860px){
-      .grid{ grid-template-columns: 0.95fr 1.05fr; gap: 18px; }
+    @media (min-width: 900px){
+      .grid{ grid-template-columns: 1.05fr 0.95fr; align-items:start; }
     }
 
     .card{
-      border:1px solid var(--border);
-      background: linear-gradient(180deg, var(--panel2), var(--panel));
+      background: var(--card);
+      border: 1px solid var(--border);
       border-radius: var(--r);
       box-shadow: var(--shadow);
-      padding: 16px;
+      overflow:hidden;
     }
-
-    .card h3{
-      margin:0 0 10px;
-      font-size: 14px;
-      color: var(--muted);
-      font-weight: 600;
-      letter-spacing: .3px;
-      text-transform: uppercase;
-    }
-
-    .nowServing{
+    .cardHead{
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
       display:flex;
-      align-items:flex-start;
+      align-items:center;
       justify-content:space-between;
-      gap: 14px;
+      gap:12px;
     }
-    .bigToken{
-      font-size: 44px;
-      font-weight: 800;
-      letter-spacing: 1px;
-      line-height: 1;
-      margin: 2px 0 6px;
-    }
-    .mini{
-      font-size: 13px;
+    .cardHead h2{
+      margin:0;
+      font-size:14px;
+      letter-spacing:.6px;
+      text-transform:uppercase;
       color: var(--muted);
-      line-height: 1.5;
+      font-weight:800;
     }
     .pill{
-      display:inline-flex;
+      font-size:12px;
+      color: var(--muted);
       padding: 6px 10px;
       border-radius: 999px;
-      border:1px solid var(--border);
-      background: rgba(0,0,0,0.2);
-      font-size: 13px;
-      color: var(--muted);
+      border: 1px solid var(--border);
+      background:#f8fbff;
+      white-space:nowrap;
     }
 
-    form{ margin:0; }
-    .row{
+    /* LED board style */
+    .board{
+      padding: 18px 16px 16px;
       display:grid;
       grid-template-columns: 1fr;
-      gap: 10px;
-      margin-bottom: 10px;
+      gap: 12px;
     }
-    @media (min-width: 540px){
-      .row.two{ grid-template-columns: 1fr 1fr; }
+    .boardRow{
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+      align-items:stretch;
+    }
+    .tile{
+      flex:1;
+      min-width: 240px;
+      border-radius: 16px;
+      border:1px solid var(--border);
+      background: linear-gradient(180deg, #ffffff, #f8fbff);
+      padding: 14px;
+    }
+    .k{
+      font-size:12px;
+      color: var(--muted);
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:.6px;
+      margin-bottom:8px;
+    }
+    .tokenBig{
+      font-size:56px;
+      font-weight:900;
+      letter-spacing:2px;
+      color:#0b1b3a;
+      line-height: 1;
+      margin: 6px 0 0;
+    }
+    .stat{
+      font-size:14px;
+      color: var(--muted);
+      margin-top: 10px;
+      line-height: 1.6;
+    }
+    .hint{
+      font-size:13px;
+      color: var(--muted);
+      padding: 0 16px 16px;
     }
 
+    /* Form */
+    form{ padding: 16px; }
     label{
       display:block;
       font-size: 12px;
       color: var(--muted);
+      font-weight: 800;
+      text-transform:uppercase;
+      letter-spacing:.6px;
       margin-bottom: 6px;
     }
-
     input, textarea{
       width:100%;
       padding: 12px 12px;
       border-radius: 14px;
-      border:1px solid rgba(255,255,255,0.14);
-      background: rgba(0,0,0,0.28);
-      color: var(--text);
-      outline: none;
+      border: 1px solid var(--border);
+      background: #fbfdff;
+      outline:none;
       font-size: 15px;
     }
-    textarea{ min-height: 92px; resize: vertical; }
     input:focus, textarea:focus{
-      border-color: rgba(37,99,235,0.65);
-      box-shadow: 0 0 0 4px rgba(37,99,235,0.18);
+      border-color: rgba(14,165,233,0.55);
+      box-shadow: 0 0 0 4px rgba(14,165,233,0.18);
+      background:white;
     }
-
+    textarea{ min-height: 92px; resize: vertical; }
+    .row{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    @media (min-width: 540px){
+      .row.two{ grid-template-columns: 1fr 1fr; }
+    }
     .help{
       font-size: 12px;
       color: var(--muted);
-      margin-top: 4px;
+      margin-top: 6px;
     }
 
     .actions{
       display:flex;
       gap: 10px;
-      flex-wrap: wrap;
       margin-top: 12px;
+      flex-wrap:wrap;
     }
-
     .btn{
-      appearance:none;
       border:0;
       cursor:pointer;
       border-radius: 14px;
       padding: 12px 14px;
-      font-weight: 700;
+      font-weight: 900;
       font-size: 15px;
-      color: white;
+      color:white;
       background: linear-gradient(180deg, var(--brand), var(--brand2));
-      min-width: 170px;
+      min-width: 180px;
     }
-    .btn:disabled{
-      opacity: .65;
-      cursor: not-allowed;
-    }
+    .btn:disabled{opacity:.7; cursor:not-allowed}
     .btnGhost{
-      background: transparent;
-      border:1px solid var(--border);
+      background:#ffffff;
+      border: 1px solid var(--border);
       color: var(--text);
-      font-weight: 600;
-      min-width: 170px;
+      font-weight: 800;
+      min-width: 180px;
     }
 
     .msg{
@@ -202,94 +240,125 @@
       padding: 12px;
       border-radius: 14px;
       border:1px solid var(--border);
-      background: rgba(0,0,0,0.22);
+      background:#fbfdff;
       color: var(--muted);
       font-size: 14px;
       display:none;
     }
-    .msg.ok{ display:block; border-color: rgba(34,197,94,0.35); color: rgba(255,255,255,0.9); }
-    .msg.err{ display:block; border-color: rgba(239,68,68,0.45); color: rgba(255,255,255,0.92); }
+    .msg.ok{display:block; border-color: rgba(22,163,74,0.35); background: rgba(22,163,74,0.08); color: #0b3b1d;}
+    .msg.err{display:block; border-color: rgba(220,38,38,0.35); background: rgba(220,38,38,0.08); color: #4a0c0c;}
 
     .confirm{
       margin-top: 14px;
       padding: 14px;
       border-radius: 16px;
-      border:1px solid rgba(34,197,94,0.35);
-      background: rgba(34,197,94,0.10);
+      border:1px dashed rgba(14,165,233,0.55);
+      background: rgba(14,165,233,0.08);
       display:none;
     }
-    .confirm .token{
-      font-size: 34px;
+    .confirm .t{
+      font-size: 13px;
+      color: var(--muted);
       font-weight: 800;
-      letter-spacing: 1px;
-      margin: 6px 0 8px;
+      text-transform:uppercase;
+      letter-spacing:.6px;
+    }
+    .confirm .num{
+      font-size: 42px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      margin: 8px 0;
+      color:#0b1b3a;
     }
     .confirm a{
-      color: white;
-      text-decoration: none;
       display:inline-block;
       margin-top: 6px;
       padding: 10px 12px;
       border-radius: 12px;
-      background: rgba(37,99,235,0.28);
-      border:1px solid rgba(37,99,235,0.35);
-      font-weight: 700;
+      border:1px solid rgba(14,165,233,0.35);
+      background:white;
+      color:#0b1b3a;
+      font-weight: 900;
+      text-decoration:none;
     }
   </style>
 </head>
 
 <body>
-  <div class="wrap">
-
-    <div class="topbar">
-      <div>
-        <div class="title">Clinic Token Booking</div>
-        <div class="subtitle">Reserve your token and track your turn in real time.</div>
+  <div class="topbar">
+    <div class="topbarInner">
+      <div class="brand">
+        <div class="logo">+</div>
+        <div>
+          <div class="title">Clinic Token Booking</div>
+          <div class="sub">Fast registration • Live queue updates</div>
+        </div>
       </div>
-      <div class="badge" title="Live updates">
-        <span class="dot"></span>
-        <span id="liveLabel">Live</span>
-      </div>
+      <div class="live"><span class="dot"></span><span id="liveLabel">Live</span></div>
     </div>
+  </div>
 
+  <div class="wrap">
     <div class="grid">
 
-      <!-- Left: now serving -->
+      <!-- Hospital-style token board -->
       <div class="card">
-        <h3>Now serving</h3>
-        <div class="nowServing">
-          <div>
-            <div class="bigToken" id="nowServing">—</div>
-            <div class="mini">
-              Estimated wait: <b id="estWait">—</b><br/>
-              People waiting: <b id="waitingCount">—</b>
+        <div class="cardHead">
+          <h2>Queue display</h2>
+          <div class="pill">Clinic: {{ clinic_slug }}</div>
+        </div>
+
+        <div class="board">
+          <div class="boardRow">
+            <div class="tile">
+              <div class="k">Now serving</div>
+              <div class="tokenBig" id="nowServing">—</div>
+              <div class="stat">
+                Estimated wait: <b id="estWait">—</b><br/>
+                People waiting: <b id="waitingCount">—</b>
+              </div>
+            </div>
+
+            <div class="tile">
+              <div class="k">Instructions</div>
+              <div class="stat">
+                • Fill name + mobile and press <b>Reserve</b><br/>
+                • Keep the tracking page open<br/>
+                • Arrive when your token is close
+              </div>
             </div>
           </div>
-          <div class="pill" id="clinicSlug">Clinic: {{ clinic_slug }}</div>
+        </div>
+
+        <div class="hint">
+          This board refreshes automatically every few seconds.
         </div>
       </div>
 
-      <!-- Right: booking form -->
+      <!-- Registration form -->
       <div class="card">
-        <h3>Reserve token</h3>
+        <div class="cardHead">
+          <h2>Patient registration</h2>
+          <div class="pill">Walk-in / Online</div>
+        </div>
 
         <form id="reserveForm">
           <div class="row">
             <div>
-              <label for="name">Name</label>
-              <input id="name" name="name" placeholder="Your full name" autocomplete="name" required>
+              <label for="name">Patient name</label>
+              <input id="name" name="name" placeholder="Enter full name" autocomplete="name" required>
             </div>
           </div>
 
           <div class="row two">
             <div>
-              <label for="phone">Mobile</label>
-              <input id="phone" name="phone" placeholder="10-digit or +91..." autocomplete="tel" required>
+              <label for="phone">Mobile number</label>
+              <input id="phone" name="phone" placeholder="10 digits or +91XXXXXXXXXX" autocomplete="tel" required>
               <div class="help">Accepted: 10 digits or 91XXXXXXXXXX or +91XXXXXXXXXX</div>
             </div>
             <div>
-              <label for="address">Address</label>
-              <input id="address" name="address" placeholder="Area / landmark (optional)">
+              <label for="address">Address (optional)</label>
+              <input id="address" name="address" placeholder="Area / landmark">
             </div>
           </div>
 
@@ -301,10 +370,10 @@
           <div class="msg" id="msgBox"></div>
 
           <div class="confirm" id="confirmBox">
-            <div class="mini">Your token</div>
-            <div class="token" id="yourToken">—</div>
-            <div class="mini">Keep this page open. It updates automatically.</div>
-            <a id="trackLink" href="#" target="_blank">Track Token</a>
+            <div class="t">Your token</div>
+            <div class="num" id="yourToken">—</div>
+            <div class="help">Keep this page open. Status updates automatically.</div>
+            <a id="trackLink" href="#" target="_blank">Open Tracking Page</a>
           </div>
         </form>
       </div>
