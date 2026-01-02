@@ -29,15 +29,27 @@ class Token(models.Model):
 
     counter = models.ForeignKey(Counter, null=True, blank=True, on_delete=models.SET_NULL)
 
-    number = models.CharField(max_length=20)  # NOT unique; unique per (service_date, number)
+    number = models.CharField(max_length=20)  # unique per (service_date, number)
     service_date = models.DateField(db_index=True)
     sequence = models.PositiveIntegerField(db_index=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="active")
+
+    # ✅ NEW: store patient/customer details (optional)
+    customer_name = models.CharField(max_length=120, blank=True, default="")
+    customer_phone = models.CharField(max_length=32, blank=True, default="")
+    customer_address = models.TextField(blank=True, default="")
+
     created_at = models.DateTimeField(auto_now_add=True)
     used_at = models.DateTimeField(null=True, blank=True)
+
+    # keep default_expires_at for migration compatibility
     expires_at = models.DateTimeField(default=default_expires_at)
 
     class Meta:
+        indexes = [
+            models.Index(fields=["service_date", "status"]),
+            models.Index(fields=["service_date", "counter", "status"]),
+        ]
         constraints = [
             models.UniqueConstraint(fields=["service_date", "number"], name="uniq_token_number_per_day"),
             models.UniqueConstraint(fields=["service_date", "sequence"], name="uniq_token_seq_per_day"),
