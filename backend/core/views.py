@@ -3,7 +3,7 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction, IntegrityError
-from django.db.models import Count, Avg, F, ExpressionWrapper, DurationField, Q, IntegerField, Max
+from django.db.models import Avg, F, ExpressionWrapper, DurationField, IntegerField, Max
 from django.db.models.functions import Substr, Cast
 from django.http import JsonResponse
 from django.shortcuts import render
@@ -21,9 +21,24 @@ STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
 
+def _first_attr(obj, names, default=""):
+    """
+    Returns the first existing non-null attribute value from obj among `names`.
+    Helps when your Token model has different field names in different versions.
+    """
+    for n in names:
+        if hasattr(obj, n):
+            v = getattr(obj, n)
+            if v is None:
+                continue
+            return v
+    return default
+
+
 def _issue_token_for_today(*, counter) -> Token:
     """
     Staff issue token for today (assigned to counter).
+    Option-2 numbering: single A001.. per day across all counters.
     """
     service_date = timezone.localdate()
     prefix_len = len(TOKEN_PREFIX)
@@ -36,8 +51,8 @@ def _issue_token_for_today(*, counter) -> Token:
                 last_seq = qs.aggregate(m=Max("sequence"))["m"] or 0
                 last_num = (
                     qs.filter(number__startswith=TOKEN_PREFIX)
-                      .annotate(num=Cast(Substr("number", prefix_len + 1), IntegerField()))
-                      .aggregate(m=Max("num"))["m"]
+                    .annotate(num=Cast(Substr("number", prefix_len + 1), IntegerField()))
+                    .aggregate(m=Max("num"))["m"]
                 ) or 0
 
                 next_seq = max(int(last_seq), int(last_num)) + 1
@@ -51,6 +66,7 @@ def _issue_token_for_today(*, counter) -> Token:
                     status=STATUS_ACTIVE,
                 )
                 return token
+
         except IntegrityError:
             continue
 
@@ -119,21 +135,24 @@ def next_token(request):
     except Counter.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
 
+    service_date = timezone.localdate()
+
     with transaction.atomic():
         token = (
             Token.objects.select_for_update()
-            .filter(counter=counter, status=STATUS_ACTIVE)
-            .order_by("created_at", "id")
+            .filter(counter=counter, service_date=service_date, status=STATUS_ACTIVE)
+            .order_by("sequence", "id")
             .first()
         )
 
+        # expire old ones if your model supports is_expired()
         while token and hasattr(token, "is_expired") and token.is_expired():
             token.status = STATUS_EXPIRED
             token.save(update_fields=["status"])
             token = (
                 Token.objects.select_for_update()
-                .filter(counter=counter, status=STATUS_ACTIVE)
-                .order_by("created_at", "id")
+                .filter(counter=counter, service_date=service_date, status=STATUS_ACTIVE)
+                .order_by("sequence", "id")
                 .first()
             )
 
@@ -152,9 +171,11 @@ def next_token(request):
         "token_id": token.id,
         "status": token.status,
         "used_at": token.used_at.isoformat() if token.used_at else None,
-        "customer_name": getattr(token, "customer_name", ""),
-        "customer_phone": getattr(token, "customer_phone", ""),
-        "customer_address": getattr(token, "customer_address", ""),
+
+        # ✅ always return details using flexible field mapping
+        "customer_name": _first_attr(token, ["customer_name", "patient_name", "name", "full_name"], ""),
+        "customer_phone": _first_attr(token, ["customer_phone", "patient_phone", "phone", "mobile"], ""),
+        "customer_address": _first_attr(token, ["customer_address", "patient_address", "address"], ""),
     })
 
 
@@ -207,7 +228,7 @@ def token_status(request, number):
 # -------------------------
 # API: queue status (optionally per counter)
 # GET /api/queue/status/?counter=A1
-# returns waiting list with patient info
+# returns waiting list with customer info
 # -------------------------
 @require_GET
 def queue_status(request):
@@ -225,18 +246,21 @@ def queue_status(request):
     else:
         counter = None
 
-    active = base.filter(status=STATUS_ACTIVE).order_by("created_at", "id")
-    waiting_count = active.count()
+    active_qs = base.filter(status=STATUS_ACTIVE).order_by("sequence", "id")
+    waiting_count = active_qs.count()
 
     waiting_list = []
-    for t in active[:20]:
+    for t in active_qs[:50]:
         waiting_list.append({
             "token_id": t.id,
             "number": t.number,
-            "created_at": t.created_at.isoformat() if getattr(t, "created_at", None) else None,
-            "customer_name": getattr(t, "customer_name", ""),
-            "customer_phone": getattr(t, "customer_phone", ""),
-            "customer_address": getattr(t, "customer_address", ""),
+            "created_at": getattr(t, "created_at", None).isoformat() if getattr(t, "created_at", None) else None,
+
+            # ✅ flexible mapping (THIS is what fixes your staff table)
+            "customer_name": _first_attr(t, ["customer_name", "patient_name", "name", "full_name"], ""),
+            "customer_phone": _first_attr(t, ["customer_phone", "patient_phone", "phone", "mobile"], ""),
+            "customer_address": _first_attr(t, ["customer_address", "patient_address", "address"], ""),
+            "status": t.status,
         })
 
     last_used = (
@@ -258,12 +282,10 @@ def queue_status(request):
 
 # -------------------------
 # Admin dashboard (custom)
-# FIX: counts all tokens for today
 # -------------------------
 @login_required
 def admin_dashboard(request):
     service_date = timezone.localdate()
-
     today = Token.objects.filter(service_date=service_date)
 
     total_tokens = today.count()
@@ -271,17 +293,14 @@ def admin_dashboard(request):
     waiting_tokens = today.filter(status=STATUS_ACTIVE).count()
 
     avg_wait = None
-    # average wait = used_at - created_at, only if both exist
-    if total_tokens:
-        used_qs = today.filter(status=STATUS_USED, used_at__isnull=False, created_at__isnull=False).annotate(
-            wait=ExpressionWrapper(F("used_at") - F("created_at"), output_field=DurationField())
-        )
-        if used_qs.exists():
-            avg = used_qs.aggregate(a=Avg("wait"))["a"]
-            if avg:
-                avg_wait = int(avg.total_seconds() // 60)
+    used_qs = today.filter(status=STATUS_USED, used_at__isnull=False, created_at__isnull=False).annotate(
+        wait=ExpressionWrapper(F("used_at") - F("created_at"), output_field=DurationField())
+    )
+    if used_qs.exists():
+        avg = used_qs.aggregate(a=Avg("wait"))["a"]
+        if avg:
+            avg_wait = int(avg.total_seconds() // 60)
 
-    # per counter summary
     counters = Counter.objects.filter(is_active=True).order_by("code")
     per_counter = []
     for c in counters:
@@ -296,7 +315,6 @@ def admin_dashboard(request):
             "waiting": waiting,
         })
 
-    # include "unassigned" too (just in case)
     unassigned_issued = today.filter(counter__isnull=True).count()
     unassigned_served = today.filter(counter__isnull=True, status=STATUS_USED).count()
     unassigned_waiting = today.filter(counter__isnull=True, status=STATUS_ACTIVE).count()
