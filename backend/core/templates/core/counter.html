@@ -7,7 +7,7 @@
   <style>
     body { font-family: Arial, sans-serif; padding: 18px; }
     .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    select, button { font-size: 16px; padding: 10px; }
+    select, button, input, textarea { font-size: 16px; padding: 10px; }
     button { cursor: pointer; }
     .card { margin-top: 14px; padding: 14px; border: 1px solid #ddd; border-radius: 10px; }
     .big { font-size: 44px; font-weight: 700; margin: 10px 0; }
@@ -19,6 +19,9 @@
     th { background:#fafafa; }
     .pill { padding:2px 8px; border-radius:999px; background:#f2f2f2; display:inline-block; }
     .right { margin-left:auto; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .grid textarea { grid-column: 1 / -1; }
+    @media (max-width: 680px){ .grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -39,6 +42,19 @@
     <a href="/admin-dashboard/" target="_blank" style="margin-left:12px;">Open Admin Dashboard</a>
 
     <span class="right muted" id="clock">—</span>
+  </div>
+
+  <!-- ✅ NEW: Staff can enter patient details when issuing token -->
+  <div class="card">
+    <div class="muted"><b>Patient Details (optional)</b></div>
+    <div class="grid" style="margin-top:10px;">
+      <input id="p_name" placeholder="Patient name"/>
+      <input id="p_phone" placeholder="Phone"/>
+      <textarea id="p_address" placeholder="Address"></textarea>
+    </div>
+    <div class="muted" style="margin-top:8px;">
+      If left empty, token will be issued without details.
+    </div>
   </div>
 
   <div class="card">
@@ -106,20 +122,38 @@ function esc(s){
   return (s || "").toString().replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-function pick(obj, keys){
-  for (const k of keys){
-    const v = obj && obj[k];
-    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
-  }
-  return "";
+function getPatientInputs(){
+  return {
+    name: (document.getElementById("p_name").value || "").trim(),
+    phone: (document.getElementById("p_phone").value || "").trim(),
+    address: (document.getElementById("p_address").value || "").trim(),
+  };
+}
+
+function clearPatientInputs(){
+  document.getElementById("p_name").value = "";
+  document.getElementById("p_phone").value = "";
+  document.getElementById("p_address").value = "";
 }
 
 async function issueToken(){
   const code = getCounter();
+  const p = getPatientInputs();
+
   try{
-    const j = await postJson("/api/token/issue/", { counter: code });
+    const j = await postJson("/api/token/issue/", {
+      counter: code,
+      name: p.name,
+      phone: p.phone,
+      address: p.address
+    });
+
     setMsg(`Issued token: ${j.number}`, true);
     document.getElementById("big").textContent = j.number;
+
+    // optional: clear after issue
+    clearPatientInputs();
+
     await loadQueue();
   }catch(e){
     setMsg((e.error || "Issue failed") + (e.status ? ` (HTTP ${e.status})` : ""), false);
@@ -150,28 +184,19 @@ async function loadQueue(){
     msg.textContent =
       `Now serving: ${j.now_serving || "—"} | Waiting: ${j.waiting_count || 0} | Next: ${j.next_token || "—"}`;
 
+    body.innerHTML = rows.map(r => `
+      <tr>
+        <td><b>${esc(r.number)}</b></td>
+        <td>${esc(r.customer_name)}</td>
+        <td>${esc(r.customer_phone)}</td>
+        <td>${esc(r.customer_address)}</td>
+        <td><span class="pill">${esc((r.status || "ACTIVE").toUpperCase())}</span></td>
+      </tr>
+    `).join("");
+
     if (!rows.length){
       body.innerHTML = `<tr><td colspan="5" class="muted">No active tokens for this counter.</td></tr>`;
-      return;
     }
-
-    body.innerHTML = rows.map(r => {
-      const nm = pick(r, ["customer_name","patient_name","name","full_name"]);
-      const ph = pick(r, ["customer_phone","patient_phone","phone","mobile","phone_number","mobile_number"]);
-      const ad = pick(r, ["customer_address","patient_address","address","location","addr"]);
-
-      const st = pick(r, ["status"]) || "ACTIVE";
-
-      return `
-        <tr>
-          <td><b>${esc(r.number)}</b></td>
-          <td>${esc(nm)}</td>
-          <td>${esc(ph)}</td>
-          <td>${esc(ad)}</td>
-          <td><span class="pill">${esc(st.toUpperCase())}</span></td>
-        </tr>
-      `;
-    }).join("");
 
   }catch(e){
     msg.textContent = "Could not load queue. Check /api/queue/status/ endpoint.";

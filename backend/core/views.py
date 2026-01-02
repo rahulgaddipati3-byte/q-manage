@@ -21,25 +21,59 @@ STATUS_USED = "used"
 STATUS_EXPIRED = "expired"
 
 
-def _first_attr(obj, names, default=""):
-    """
-    Returns the first existing non-null attribute value from obj among `names`.
-    Helps when your Token model has different field names in different versions.
-    """
-    for n in names:
-        if hasattr(obj, n):
-            v = getattr(obj, n)
-            if v is None:
-                continue
-            return v
-    return default
+# -------------------------
+# Helpers
+# -------------------------
+def _read_json(request):
+    try:
+        return json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        return {}
 
 
-def _issue_token_for_today(*, counter) -> Token:
+def _token_field_names(model_cls):
+    names = set()
+    for f in model_cls._meta.get_fields():
+        if getattr(f, "concrete", False):
+            names.add(f.name)
+    return names
+
+
+def _set_first_existing_field(obj, candidates, value):
+    if value is None:
+        return False
+    value = str(value).strip()
+    if value == "":
+        return False
+
+    field_names = _token_field_names(obj.__class__)
+    for name in candidates:
+        if name in field_names:
+            setattr(obj, name, value)
+            return True
+    return False
+
+
+def _get_token_details(token):
     """
-    Staff issue token for today (assigned to counter).
-    Option-2 numbering: single A001.. per day across all counters.
+    Read customer details from whichever fields exist in YOUR Token model.
     """
+    def first_attr(names, default=""):
+        for n in names:
+            if hasattr(token, n):
+                v = getattr(token, n)
+                if v:
+                    return v
+        return default
+
+    return {
+        "customer_name": first_attr(["customer_name", "patient_name", "name", "full_name"], ""),
+        "customer_phone": first_attr(["customer_phone", "patient_phone", "phone", "mobile"], ""),
+        "customer_address": first_attr(["customer_address", "patient_address", "address"], ""),
+    }
+
+
+def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
     service_date = timezone.localdate()
     prefix_len = len(TOKEN_PREFIX)
 
@@ -65,6 +99,15 @@ def _issue_token_for_today(*, counter) -> Token:
                     number=number,
                     status=STATUS_ACTIVE,
                 )
+
+                changed = False
+                changed |= _set_first_existing_field(token, ["customer_name", "patient_name", "name", "full_name"], name)
+                changed |= _set_first_existing_field(token, ["customer_phone", "patient_phone", "phone", "mobile"], phone)
+                changed |= _set_first_existing_field(token, ["customer_address", "patient_address", "address"], address)
+
+                if changed:
+                    token.save()
+
                 return token
 
         except IntegrityError:
@@ -75,21 +118,22 @@ def _issue_token_for_today(*, counter) -> Token:
 
 # -------------------------
 # API: issue token
-# POST {"counter":"A1"}
+# POST {"counter":"A1", "name":"", "phone":"", "address":""}
 # -------------------------
 @csrf_exempt
 def issue_token(request):
     if request.method != "POST":
         return JsonResponse({"ok": False, "error": "POST required"}, status=405)
 
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        body = {}
+    body = _read_json(request)
 
     counter_code = str(body.get("counter", "")).strip()
     if not counter_code:
         return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
+
+    name = str(body.get("name", "") or "").strip()
+    phone = str(body.get("phone", "") or "").strip()
+    address = str(body.get("address", "") or "").strip()
 
     try:
         counter = Counter.objects.get(code=counter_code, is_active=True)
@@ -97,9 +141,11 @@ def issue_token(request):
         return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
 
     try:
-        token = _issue_token_for_today(counter=counter)
+        token = _issue_token_for_today(counter=counter, name=name, phone=phone, address=address)
     except IntegrityError:
         return JsonResponse({"ok": False, "error": "Could not issue token. Try again."}, status=409)
+
+    details = _get_token_details(token)
 
     return JsonResponse({
         "ok": True,
@@ -108,6 +154,7 @@ def issue_token(request):
         "token_id": token.id,
         "status": token.status,
         "service_date": str(token.service_date),
+        **details,
     })
 
 
@@ -121,10 +168,7 @@ def next_token(request):
     if request.method != "POST":
         return JsonResponse({"ok": False, "error": "POST required"}, status=405)
 
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        body = {}
+    body = _read_json(request)
 
     counter_code = str(body.get("counter", "")).strip()
     if not counter_code:
@@ -135,24 +179,21 @@ def next_token(request):
     except Counter.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
 
-    service_date = timezone.localdate()
-
     with transaction.atomic():
         token = (
             Token.objects.select_for_update()
-            .filter(counter=counter, service_date=service_date, status=STATUS_ACTIVE)
-            .order_by("sequence", "id")
+            .filter(counter=counter, status=STATUS_ACTIVE)
+            .order_by("created_at", "id")
             .first()
         )
 
-        # expire old ones if your model supports is_expired()
         while token and hasattr(token, "is_expired") and token.is_expired():
             token.status = STATUS_EXPIRED
             token.save(update_fields=["status"])
             token = (
                 Token.objects.select_for_update()
-                .filter(counter=counter, service_date=service_date, status=STATUS_ACTIVE)
-                .order_by("sequence", "id")
+                .filter(counter=counter, status=STATUS_ACTIVE)
+                .order_by("created_at", "id")
                 .first()
             )
 
@@ -163,6 +204,8 @@ def next_token(request):
         token.used_at = timezone.now()
         token.save(update_fields=["status", "used_at"])
 
+    details = _get_token_details(token)
+
     return JsonResponse({
         "ok": True,
         "message": "Next token called",
@@ -171,64 +214,14 @@ def next_token(request):
         "token_id": token.id,
         "status": token.status,
         "used_at": token.used_at.isoformat() if token.used_at else None,
-
-        # ✅ always return details using flexible field mapping
-        "customer_name": _first_attr(token, ["customer_name", "patient_name", "name", "full_name"], ""),
-        "customer_phone": _first_attr(token, ["customer_phone", "patient_phone", "phone", "mobile"], ""),
-        "customer_address": _first_attr(token, ["customer_address", "patient_address", "address"], ""),
+        **details,
     })
 
 
 # -------------------------
-# API: consume token by number
-# -------------------------
-@csrf_exempt
-def consume_token(request):
-    if request.method != "POST":
-        return JsonResponse({"ok": False, "error": "POST required"}, status=405)
-
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        body = {}
-
-    number = str(body.get("number", "")).strip()
-    if not number:
-        return JsonResponse({"ok": False, "error": "number is required"}, status=400)
-
-    with transaction.atomic():
-        token = Token.objects.select_for_update().filter(number=number).first()
-        if not token:
-            return JsonResponse({"ok": False, "error": "Token not found"}, status=404)
-
-        token.status = STATUS_USED
-        token.used_at = timezone.now()
-        token.save(update_fields=["status", "used_at"])
-
-    return JsonResponse({"ok": True, "number": token.number, "status": token.status})
-
-
-# -------------------------
-# API: token status by number
-# -------------------------
-def token_status(request, number):
-    token = Token.objects.filter(number=number).first()
-    if not token:
-        return JsonResponse({"ok": False, "error": "Token not found"}, status=404)
-
-    return JsonResponse({
-        "ok": True,
-        "number": token.number,
-        "status": token.status,
-        "service_date": str(token.service_date),
-        "counter": token.counter.code if token.counter else None,
-    })
-
-
-# -------------------------
-# API: queue status (optionally per counter)
+# API: queue status
 # GET /api/queue/status/?counter=A1
-# returns waiting list with customer info
+# returns waiting list with patient info
 # -------------------------
 @require_GET
 def queue_status(request):
@@ -246,20 +239,19 @@ def queue_status(request):
     else:
         counter = None
 
-    active_qs = base.filter(status=STATUS_ACTIVE).order_by("sequence", "id")
-    waiting_count = active_qs.count()
+    active = base.filter(status=STATUS_ACTIVE).order_by("created_at", "id")
+    waiting_count = active.count()
 
     waiting_list = []
-    for t in active_qs[:50]:
+    for t in active[:50]:
+        d = _get_token_details(t)
         waiting_list.append({
             "token_id": t.id,
             "number": t.number,
-            "created_at": getattr(t, "created_at", None).isoformat() if getattr(t, "created_at", None) else None,
-
-            # ✅ flexible mapping (THIS is what fixes your staff table)
-            "customer_name": _first_attr(t, ["customer_name", "patient_name", "name", "full_name"], ""),
-            "customer_phone": _first_attr(t, ["customer_phone", "patient_phone", "phone", "mobile"], ""),
-            "customer_address": _first_attr(t, ["customer_address", "patient_address", "address"], ""),
+            "created_at": t.created_at.isoformat() if getattr(t, "created_at", None) else None,
+            "customer_name": d["customer_name"],
+            "customer_phone": d["customer_phone"],
+            "customer_address": d["customer_address"],
             "status": t.status,
         })
 
@@ -293,13 +285,16 @@ def admin_dashboard(request):
     waiting_tokens = today.filter(status=STATUS_ACTIVE).count()
 
     avg_wait = None
-    used_qs = today.filter(status=STATUS_USED, used_at__isnull=False, created_at__isnull=False).annotate(
-        wait=ExpressionWrapper(F("used_at") - F("created_at"), output_field=DurationField())
-    )
-    if used_qs.exists():
-        avg = used_qs.aggregate(a=Avg("wait"))["a"]
-        if avg:
-            avg_wait = int(avg.total_seconds() // 60)
+    if total_tokens:
+        used_qs = today.filter(
+            status=STATUS_USED, used_at__isnull=False, created_at__isnull=False
+        ).annotate(
+            wait=ExpressionWrapper(F("used_at") - F("created_at"), output_field=DurationField())
+        )
+        if used_qs.exists():
+            avg = used_qs.aggregate(a=Avg("wait"))["a"]
+            if avg:
+                avg_wait = int(avg.total_seconds() // 60)
 
     counters = Counter.objects.filter(is_active=True).order_by("code")
     per_counter = []
@@ -307,25 +302,12 @@ def admin_dashboard(request):
         issued = today.filter(counter=c).count()
         served = today.filter(counter=c, status=STATUS_USED).count()
         waiting = today.filter(counter=c, status=STATUS_ACTIVE).count()
-        per_counter.append({
-            "code": c.code,
-            "name": c.name,
-            "issued": issued,
-            "served": served,
-            "waiting": waiting,
-        })
+        per_counter.append({"code": c.code, "name": c.name, "issued": issued, "served": served, "waiting": waiting})
 
     unassigned_issued = today.filter(counter__isnull=True).count()
     unassigned_served = today.filter(counter__isnull=True, status=STATUS_USED).count()
     unassigned_waiting = today.filter(counter__isnull=True, status=STATUS_ACTIVE).count()
-
-    per_counter.append({
-        "code": "(unassigned)",
-        "name": "(unassigned)",
-        "issued": unassigned_issued,
-        "served": unassigned_served,
-        "waiting": unassigned_waiting,
-    })
+    per_counter.append({"code": "(unassigned)", "name": "(unassigned)", "issued": unassigned_issued, "served": unassigned_served, "waiting": unassigned_waiting})
 
     return render(request, "core/admin_dashboard.html", {
         "service_date": service_date,
