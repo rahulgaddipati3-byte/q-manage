@@ -1,174 +1,404 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/>
   <title>Clinic Token Booking</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+
   <style>
-    body { font-family: Arial, sans-serif; background:#0b1220; color:#fff; margin:0; }
-    .wrap { max-width: 560px; margin: 40px auto; padding: 16px; }
-    .card { background:#111b2e; border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:18px; margin-bottom:14px; }
-    h2 { margin:0 0 6px 0; }
-    .muted { color: rgba(255,255,255,.7); }
-    label { display:block; margin: 10px 0 6px; }
-    input, textarea {
-      width:100%;
-      padding:12px;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,.12);
-      background:#0b1220;
-      color:#fff;
-      box-sizing:border-box;
+    :root{
+      --bg: #070b14;
+      --panel: rgba(255,255,255,0.06);
+      --panel2: rgba(255,255,255,0.08);
+      --border: rgba(255,255,255,0.12);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.65);
+      --good: #22c55e;
+      --bad: #ef4444;
+      --brand: #2563eb;
+      --brand2: #1d4ed8;
+      --shadow: 0 18px 50px rgba(0,0,0,0.45);
+      --r: 18px;
     }
-    textarea { min-height: 72px; resize: vertical; }
-    button {
+
+    * { box-sizing: border-box; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: radial-gradient(1200px 600px at 30% -10%, rgba(37,99,235,0.25), transparent 55%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(34,197,94,0.12), transparent 60%),
+                  var(--bg);
+      color: var(--text);
+    }
+
+    .wrap{
+      max-width: 1020px;
+      margin: 0 auto;
+      padding: 26px 16px 60px;
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom: 18px;
+    }
+    .title{
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    .subtitle{
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 8px 12px;
+      border:1px solid var(--border);
+      background: var(--panel);
+      border-radius: 999px;
+      font-size: 13px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .dot{
+      width:10px; height:10px; border-radius:999px;
+      background: var(--good);
+      box-shadow: 0 0 0 4px rgba(34,197,94,0.12);
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    @media (min-width: 860px){
+      .grid{ grid-template-columns: 0.95fr 1.05fr; gap: 18px; }
+    }
+
+    .card{
+      border:1px solid var(--border);
+      background: linear-gradient(180deg, var(--panel2), var(--panel));
+      border-radius: var(--r);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .card h3{
+      margin:0 0 10px;
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: .3px;
+      text-transform: uppercase;
+    }
+
+    .nowServing{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap: 14px;
+    }
+    .bigToken{
+      font-size: 44px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      line-height: 1;
+      margin: 2px 0 6px;
+    }
+    .mini{
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .pill{
+      display:inline-flex;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,0.2);
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    form{ margin:0; }
+    .row{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    @media (min-width: 540px){
+      .row.two{ grid-template-columns: 1fr 1fr; }
+    }
+
+    label{
+      display:block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    input, textarea{
       width:100%;
-      padding:14px;
+      padding: 12px 12px;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,0.14);
+      background: rgba(0,0,0,0.28);
+      color: var(--text);
+      outline: none;
+      font-size: 15px;
+    }
+    textarea{ min-height: 92px; resize: vertical; }
+    input:focus, textarea:focus{
+      border-color: rgba(37,99,235,0.65);
+      box-shadow: 0 0 0 4px rgba(37,99,235,0.18);
+    }
+
+    .help{
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .actions{
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .btn{
+      appearance:none;
       border:0;
-      border-radius:14px;
-      background:#2f6df6;
-      color:#fff;
-      font-size:16px;
       cursor:pointer;
-      margin-top:12px;
+      border-radius: 14px;
+      padding: 12px 14px;
+      font-weight: 700;
+      font-size: 15px;
+      color: white;
+      background: linear-gradient(180deg, var(--brand), var(--brand2));
+      min-width: 170px;
     }
-    button[disabled] { opacity: .65; cursor: not-allowed; }
-    .err { color:#ffb4b4; white-space:pre-wrap; }
-    .ok { color:#a7ffb1; white-space:pre-wrap; }
-    a { color:#9bbcff; }
+    .btn:disabled{
+      opacity: .65;
+      cursor: not-allowed;
+    }
+    .btnGhost{
+      background: transparent;
+      border:1px solid var(--border);
+      color: var(--text);
+      font-weight: 600;
+      min-width: 170px;
+    }
+
+    .msg{
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 14px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,0.22);
+      color: var(--muted);
+      font-size: 14px;
+      display:none;
+    }
+    .msg.ok{ display:block; border-color: rgba(34,197,94,0.35); color: rgba(255,255,255,0.9); }
+    .msg.err{ display:block; border-color: rgba(239,68,68,0.45); color: rgba(255,255,255,0.92); }
+
+    .confirm{
+      margin-top: 14px;
+      padding: 14px;
+      border-radius: 16px;
+      border:1px solid rgba(34,197,94,0.35);
+      background: rgba(34,197,94,0.10);
+      display:none;
+    }
+    .confirm .token{
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      margin: 6px 0 8px;
+    }
+    .confirm a{
+      color: white;
+      text-decoration: none;
+      display:inline-block;
+      margin-top: 6px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(37,99,235,0.28);
+      border:1px solid rgba(37,99,235,0.35);
+      font-weight: 700;
+    }
   </style>
 </head>
+
 <body>
   <div class="wrap">
-    <div class="card">
-      <div class="muted">Public Queue</div>
-      <h2>Clinic Token Booking</h2>
-      <div class="muted">Book a token from home and track live.</div>
+
+    <div class="topbar">
+      <div>
+        <div class="title">Clinic Token Booking</div>
+        <div class="subtitle">Reserve your token and track your turn in real time.</div>
+      </div>
+      <div class="badge" title="Live updates">
+        <span class="dot"></span>
+        <span id="liveLabel">Live</span>
+      </div>
     </div>
 
-    <div class="card">
-      <div class="muted">Now serving</div>
-      <div style="font-size:42px;font-weight:700;margin:10px 0" id="nowServing">—</div>
-      <div class="muted" id="stats">Loading…</div>
-    </div>
+    <div class="grid">
 
-    <div class="card">
-      <label for="name"><b>Name</b></label>
-      <input id="name" placeholder="Your name" autocomplete="name" />
+      <!-- Left: now serving -->
+      <div class="card">
+        <h3>Now serving</h3>
+        <div class="nowServing">
+          <div>
+            <div class="bigToken" id="nowServing">—</div>
+            <div class="mini">
+              Estimated wait: <b id="estWait">—</b><br/>
+              People waiting: <b id="waitingCount">—</b>
+            </div>
+          </div>
+          <div class="pill" id="clinicSlug">Clinic: {{ clinic_slug }}</div>
+        </div>
+      </div>
 
-      <label for="phone"><b>Mobile</b></label>
-      <input id="phone" placeholder="10-digit mobile (or 91XXXXXXXXXX)" autocomplete="tel" />
+      <!-- Right: booking form -->
+      <div class="card">
+        <h3>Reserve token</h3>
 
-      <label for="address"><b>Address</b></label>
-      <textarea id="address" placeholder="House/Street/Area (optional but recommended)" autocomplete="street-address"></textarea>
+        <form id="reserveForm">
+          <div class="row">
+            <div>
+              <label for="name">Name</label>
+              <input id="name" name="name" placeholder="Your full name" autocomplete="name" required>
+            </div>
+          </div>
 
-      <button id="reserveBtn" type="button" onclick="reserve()">Reserve Token</button>
+          <div class="row two">
+            <div>
+              <label for="phone">Mobile</label>
+              <input id="phone" name="phone" placeholder="10-digit or +91..." autocomplete="tel" required>
+              <div class="help">Accepted: 10 digits or 91XXXXXXXXXX or +91XXXXXXXXXX</div>
+            </div>
+            <div>
+              <label for="address">Address</label>
+              <input id="address" name="address" placeholder="Area / landmark (optional)">
+            </div>
+          </div>
 
-      <div style="margin-top:10px" id="msg" class="muted"></div>
-      <div class="muted" style="margin-top:10px">This page refreshes automatically every 10 seconds.</div>
+          <div class="actions">
+            <button class="btn" id="btnReserve" type="submit">Reserve Token</button>
+            <button class="btn btnGhost" id="btnClear" type="button">Clear</button>
+          </div>
+
+          <div class="msg" id="msgBox"></div>
+
+          <div class="confirm" id="confirmBox">
+            <div class="mini">Your token</div>
+            <div class="token" id="yourToken">—</div>
+            <div class="mini">Keep this page open. It updates automatically.</div>
+            <a id="trackLink" href="#" target="_blank">Track Token</a>
+          </div>
+        </form>
+      </div>
+
     </div>
   </div>
 
 <script>
 const clinicSlug = "{{ clinic_slug }}";
 
-function setMsg(text, ok=true){
-  const el = document.getElementById("msg");
-  el.className = ok ? "ok" : "err";
-  el.textContent = text || "";
+function setMsg(type, text){
+  const box = document.getElementById("msgBox");
+  box.className = "msg " + (type || "");
+  box.textContent = text || "";
+  box.style.display = text ? "block" : "none";
 }
 
-function clearMsg(){
-  setMsg("", true);
+function setConfirm(tokenNumber, trackUrl){
+  const c = document.getElementById("confirmBox");
+  document.getElementById("yourToken").textContent = tokenNumber || "—";
+  const a = document.getElementById("trackLink");
+  a.href = trackUrl || "#";
+  c.style.display = tokenNumber ? "block" : "none";
 }
 
-function digitsOnly(s){
-  return (s || "").replace(/\D/g, "");
+async function getJson(url){
+  const res = await fetch(url);
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); }
+  catch(e){ j = { ok:false, error: txt || `HTTP ${res.status}` }; }
+  if (!res.ok) throw j;
+  return j;
 }
 
-async function getSnapshot(){
+async function postJson(url, data){
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); }
+  catch(e){ j = { ok:false, error: txt || `HTTP ${res.status}` }; }
+  if (!res.ok) throw j;
+  return j;
+}
+
+async function refreshSnapshot(){
   try{
-    const res = await fetch(`/api/public/clinic/${clinicSlug}/snapshot/`, { cache: "no-store" });
-    const j = await res.json();
-
+    const j = await getJson(`/api/public/clinic/${encodeURIComponent(clinicSlug)}/snapshot/`);
     document.getElementById("nowServing").textContent = j.now_serving || "—";
-
-    const waitMin = (j.estimated_wait_min ?? 0);
-    const waiting = (j.people_waiting ?? 0);
-
-    document.getElementById("stats").textContent =
-      `Estimated wait: ${waitMin} min (approx) • People waiting: ${waiting}`;
+    document.getElementById("waitingCount").textContent = j.people_waiting ?? "—";
+    document.getElementById("estWait").textContent = (j.estimated_wait_min != null) ? `${j.estimated_wait_min} min` : "—";
+    document.getElementById("liveLabel").textContent = "Live";
   }catch(e){
-    document.getElementById("stats").textContent = "Could not load snapshot";
+    document.getElementById("liveLabel").textContent = "Offline";
   }
 }
 
-async function reserve(){
-  const btn = document.getElementById("reserveBtn");
+document.getElementById("reserveForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  setMsg("", "");
+  setConfirm(null, null);
 
-  // ✅ clear any old "Internal error" before attempting
-  clearMsg();
-
-  const name = document.getElementById("name").value.trim();
-  const phoneRaw = document.getElementById("phone").value.trim();
-  const phone = digitsOnly(phoneRaw);
-  const address = document.getElementById("address").value.trim();
-
-  if(!name){ setMsg("Name is required", false); return; }
-  if(!phone){ setMsg("Mobile is required", false); return; }
-
+  const btn = document.getElementById("btnReserve");
   btn.disabled = true;
 
+  const name = document.getElementById("name").value.trim();
+  const phone = document.getElementById("phone").value.trim();
+  const address = document.getElementById("address").value.trim();
+
   try{
-    const res = await fetch(`/api/public/clinic/${clinicSlug}/reserve/`, {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
-      // ✅ send "mobile" to match your label; backend supports phone/mobile both
-      body: JSON.stringify({ name, mobile: phone, address })
-    });
-
-    // Always try JSON first
-    let j = null;
-    const contentType = (res.headers.get("content-type") || "").toLowerCase();
-
-    if(contentType.includes("application/json")){
-      j = await res.json();
-    }else{
-      const txt = await res.text();
-      try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error: txt }; }
-    }
-
-    if(!res.ok || !j || j.ok === false){
-      const detail = j?.detail ? `\n${j.detail}` : "";
-      setMsg((j?.error || `Reserve failed (HTTP ${res.status})`) + detail, false);
-      return;
-    }
-
-    // ✅ SUCCESS — ensure no old error remains
-    clearMsg();
-
-    const tokenTxt = j.token_number ? `Your Token: ${j.token_number}\n` : "";
-    setMsg(`${tokenTxt}Redirecting to tracking page...`, true);
-
-    // Refresh snapshot quickly (optional)
-    getSnapshot();
-
-    // redirect
-    if(j.track_url){
-      window.location.href = j.track_url;
-    }else{
-      setMsg(tokenTxt + "Token reserved ✅ (No tracking URL returned)", true);
-    }
-
+    const j = await postJson(`/api/public/clinic/${encodeURIComponent(clinicSlug)}/reserve/`, { name, phone, address });
+    setMsg("ok", `Reserved successfully. Your token is ${j.token_number}.`);
+    setConfirm(j.token_number, j.track_url);
+    await refreshSnapshot();
   }catch(e){
-    setMsg("Network error. Please try again.", false);
+    setMsg("err", e.error || "Could not reserve token. Try again.");
   }finally{
     btn.disabled = false;
   }
-}
+});
 
-getSnapshot();
-setInterval(getSnapshot, 10000);
+document.getElementById("btnClear").addEventListener("click", () => {
+  document.getElementById("name").value = "";
+  document.getElementById("phone").value = "";
+  document.getElementById("address").value = "";
+  setMsg("", "");
+});
+
+refreshSnapshot();
+setInterval(refreshSnapshot, 3000);
 </script>
 </body>
 </html>
