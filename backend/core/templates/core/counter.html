@@ -83,7 +83,7 @@ async function postJson(url, data){
 }
 
 async function getJson(url){
-  const res = await fetch(url);
+  const res = await fetch(url, { cache: "no-store" });
   const txt = await res.text();
   let j = null;
   try { j = JSON.parse(txt); }
@@ -106,6 +106,14 @@ function esc(s){
   return (s || "").toString().replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
+function pick(obj, keys){
+  for (const k of keys){
+    const v = obj && obj[k];
+    if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+  }
+  return "";
+}
+
 async function issueToken(){
   const code = getCounter();
   try{
@@ -121,7 +129,6 @@ async function issueToken(){
 async function callNext(){
   const code = getCounter();
   try{
-    // Prefer API next endpoint (marks USED) - consistent with dashboard
     const j = await postJson("/api/token/next/", { counter: code });
     setMsg(`Now serving at ${j.counter}: ${j.number}`, true);
     document.getElementById("big").textContent = j.number;
@@ -143,19 +150,28 @@ async function loadQueue(){
     msg.textContent =
       `Now serving: ${j.now_serving || "—"} | Waiting: ${j.waiting_count || 0} | Next: ${j.next_token || "—"}`;
 
-    body.innerHTML = rows.map(r => `
-      <tr>
-        <td><b>${esc(r.number)}</b></td>
-        <td>${esc(r.customer_name)}</td>
-        <td>${esc(r.customer_phone)}</td>
-        <td>${esc(r.customer_address)}</td>
-        <td><span class="pill">ACTIVE</span></td>
-      </tr>
-    `).join("");
-
     if (!rows.length){
       body.innerHTML = `<tr><td colspan="5" class="muted">No active tokens for this counter.</td></tr>`;
+      return;
     }
+
+    body.innerHTML = rows.map(r => {
+      const nm = pick(r, ["customer_name","patient_name","name","full_name"]);
+      const ph = pick(r, ["customer_phone","patient_phone","phone","mobile","phone_number","mobile_number"]);
+      const ad = pick(r, ["customer_address","patient_address","address","location","addr"]);
+
+      const st = pick(r, ["status"]) || "ACTIVE";
+
+      return `
+        <tr>
+          <td><b>${esc(r.number)}</b></td>
+          <td>${esc(nm)}</td>
+          <td>${esc(ph)}</td>
+          <td>${esc(ad)}</td>
+          <td><span class="pill">${esc(st.toUpperCase())}</span></td>
+        </tr>
+      `;
+    }).join("");
 
   }catch(e){
     msg.textContent = "Could not load queue. Check /api/queue/status/ endpoint.";
@@ -164,8 +180,7 @@ async function loadQueue(){
 }
 
 function tickClock(){
-  const el = document.getElementById("clock");
-  el.textContent = new Date().toLocaleString();
+  document.getElementById("clock").textContent = new Date().toLocaleString();
 }
 
 document.getElementById("counter").addEventListener("change", loadQueue);

@@ -2,16 +2,16 @@
 import json
 import re
 
-from django.db import transaction, IntegrityError
-from django.db.models import Max, IntegerField
-from django.db.models.functions import Substr, Cast
+from django.db import IntegrityError, transaction
+from django.db.models import IntegerField, Max
+from django.db.models.functions import Cast, Substr
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from .models import Token, Counter
+from .models import Counter, Token
 
 TOKEN_PREFIX = "A"
 TOKEN_PAD = 3
@@ -66,7 +66,6 @@ def _read_payload(request):
     if request.POST:
         return request.POST
 
-    # fallback: try json
     try:
         return json.loads((request.body or b"{}").decode("utf-8"))
     except Exception:
@@ -77,47 +76,102 @@ def _default_counter():
     return Counter.objects.filter(is_active=True).order_by("code").first()
 
 
-# ---------------------------
-# Dynamic Token field mapping
-# ---------------------------
-_TOKEN_FIELD_CACHE: set[str] | None = None
+# ---------- Robust field-mapping helpers ----------
+
+_FIELD_CACHE = {}
 
 
-def _token_field_names():
+def _token_field_names(model_cls):
     """
-    Cached set of real DB field names for Token model.
+    Return a set of real concrete DB field names for the model.
+    Cached for speed.
     """
-    global _TOKEN_FIELD_CACHE
-    if _TOKEN_FIELD_CACHE is not None:
-        return _TOKEN_FIELD_CACHE
+    key = f"{model_cls._meta.label_lower}"
+    if key in _FIELD_CACHE:
+        return _FIELD_CACHE[key]
 
     names = set()
-    for f in Token._meta.get_fields():
+    for f in model_cls._meta.get_fields():
         if getattr(f, "concrete", False):
             names.add(f.name)
-    _TOKEN_FIELD_CACHE = names
+
+    _FIELD_CACHE[key] = names
     return names
 
 
 def _set_first_existing_field(obj, candidates, value):
     """
-    Set first candidate field that exists on Token model.
+    Set the first candidate field that exists on obj's model.
     """
     if value is None:
         return False
-
-    field_names = _token_field_names()
-    for fname in candidates:
-        if fname in field_names:
-            setattr(obj, fname, value)
+    field_names = _token_field_names(obj.__class__)
+    for name in candidates:
+        if name in field_names:
+            setattr(obj, name, value)
             return True
     return False
+
+
+def _store_customer_details(token: Token, name: str, phone: str, address: str):
+    """
+    Store customer details into ANY matching fields present in Token model.
+    Also supports JSON/meta field if present.
+    """
+    changed = False
+
+    # Name candidates (broad)
+    changed |= _set_first_existing_field(
+        token,
+        [
+            "customer_name", "patient_name", "client_name", "full_name", "name",
+            "person_name", "visitor_name"
+        ],
+        name,
+    )
+
+    # Phone candidates (broad)
+    changed |= _set_first_existing_field(
+        token,
+        [
+            "customer_phone", "patient_phone", "client_phone", "phone", "mobile",
+            "phone_number", "mobile_number", "contact", "contact_number"
+        ],
+        phone,
+    )
+
+    # Address candidates (broad)
+    changed |= _set_first_existing_field(
+        token,
+        [
+            "customer_address", "patient_address", "client_address", "address",
+            "addr", "location", "customer_location"
+        ],
+        address,
+    )
+
+    # If you have a JSON field for arbitrary payload, store it too
+    meta_field_candidates = ["meta", "payload", "data", "extra", "details"]
+    for mf in meta_field_candidates:
+        if mf in _token_field_names(token.__class__):
+            try:
+                existing = getattr(token, mf) or {}
+                if not isinstance(existing, dict):
+                    existing = {"value": existing}
+                existing.update({"name": name, "phone": phone, "address": address})
+                setattr(token, mf, existing)
+                changed = True
+                break
+            except Exception:
+                pass
+
+    if changed:
+        token.save(update_fields=None)  # safest (works even if unknown fields changed)
 
 
 def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
     """
     Create ACTIVE token for today with collision-safe retry.
-    Stores name/phone/address into whatever fields exist on your Token model.
     """
     if counter is None:
         raise ValueError("No active counter available")
@@ -140,7 +194,7 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
                 next_seq = max(int(last_seq), int(last_num)) + 1
                 number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
 
-                # Create with ONLY safe/known core fields
+                # Create with ONLY guaranteed fields
                 token = Token.objects.create(
                     counter=counter,
                     service_date=service_date,
@@ -149,29 +203,8 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
                     status=STATUS_ACTIVE,
                 )
 
-                changed = False
-                changed |= _set_first_existing_field(
-                    token,
-                    ["customer_name", "patient_name", "name", "full_name"],
-                    name,
-                )
-                changed |= _set_first_existing_field(
-                    token,
-                    ["customer_phone", "patient_phone", "phone", "mobile"],
-                    phone,
-                )
-                changed |= _set_first_existing_field(
-                    token,
-                    ["customer_address", "patient_address", "address"],
-                    address,
-                )
-
-                if changed:
-                    token.save(update_fields=list(_token_field_names() & {
-                        "customer_name", "patient_name", "name", "full_name",
-                        "customer_phone", "patient_phone", "phone", "mobile",
-                        "customer_address", "patient_address", "address",
-                    }))
+                # Store details in whatever fields your Token model actually has
+                _store_customer_details(token, name=name, phone=phone, address=address)
 
                 return token
 
@@ -292,9 +325,7 @@ def public_token_status(request, token_id):
     )
 
     ahead = Token.objects.filter(
-        service_date=service_date,
-        status=STATUS_ACTIVE,
-        sequence__lt=token.sequence,
+        service_date=service_date, status=STATUS_ACTIVE, sequence__lt=token.sequence
     ).count()
 
     avg_minutes = 5
