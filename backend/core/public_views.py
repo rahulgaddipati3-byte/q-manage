@@ -66,6 +66,7 @@ def _read_payload(request):
     if request.POST:
         return request.POST
 
+    # fallback: try decode as JSON
     try:
         return json.loads((request.body or b"{}").decode("utf-8"))
     except Exception:
@@ -76,97 +77,15 @@ def _default_counter():
     return Counter.objects.filter(is_active=True).order_by("code").first()
 
 
-# ---------- Robust field-mapping helpers ----------
-
-_FIELD_CACHE = {}
-
-
-def _token_field_names(model_cls):
-    """
-    Return a set of real concrete DB field names for the model.
-    Cached for speed.
-    """
-    key = f"{model_cls._meta.label_lower}"
-    if key in _FIELD_CACHE:
-        return _FIELD_CACHE[key]
-
-    names = set()
-    for f in model_cls._meta.get_fields():
-        if getattr(f, "concrete", False):
-            names.add(f.name)
-
-    _FIELD_CACHE[key] = names
-    return names
-
-
-def _set_first_existing_field(obj, candidates, value):
-    """
-    Set the first candidate field that exists on obj's model.
-    """
-    if value is None:
-        return False
-    field_names = _token_field_names(obj.__class__)
-    for name in candidates:
-        if name in field_names:
-            setattr(obj, name, value)
-            return True
-    return False
-
-
 def _store_customer_details(token: Token, name: str, phone: str, address: str):
     """
-    Store customer details into ANY matching fields present in Token model.
-    Also supports JSON/meta field if present.
+    Token model now has explicit fields:
+    customer_name, customer_phone, customer_address
     """
-    changed = False
-
-    # Name candidates (broad)
-    changed |= _set_first_existing_field(
-        token,
-        [
-            "customer_name", "patient_name", "client_name", "full_name", "name",
-            "person_name", "visitor_name"
-        ],
-        name,
-    )
-
-    # Phone candidates (broad)
-    changed |= _set_first_existing_field(
-        token,
-        [
-            "customer_phone", "patient_phone", "client_phone", "phone", "mobile",
-            "phone_number", "mobile_number", "contact", "contact_number"
-        ],
-        phone,
-    )
-
-    # Address candidates (broad)
-    changed |= _set_first_existing_field(
-        token,
-        [
-            "customer_address", "patient_address", "client_address", "address",
-            "addr", "location", "customer_location"
-        ],
-        address,
-    )
-
-    # If you have a JSON field for arbitrary payload, store it too
-    meta_field_candidates = ["meta", "payload", "data", "extra", "details"]
-    for mf in meta_field_candidates:
-        if mf in _token_field_names(token.__class__):
-            try:
-                existing = getattr(token, mf) or {}
-                if not isinstance(existing, dict):
-                    existing = {"value": existing}
-                existing.update({"name": name, "phone": phone, "address": address})
-                setattr(token, mf, existing)
-                changed = True
-                break
-            except Exception:
-                pass
-
-    if changed:
-        token.save(update_fields=None)  # safest (works even if unknown fields changed)
+    token.customer_name = (name or "").strip()
+    token.customer_phone = (phone or "").strip()
+    token.customer_address = (address or "").strip()
+    token.save(update_fields=["customer_name", "customer_phone", "customer_address"])
 
 
 def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
@@ -194,7 +113,6 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
                 next_seq = max(int(last_seq), int(last_num)) + 1
                 number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
 
-                # Create with ONLY guaranteed fields
                 token = Token.objects.create(
                     counter=counter,
                     service_date=service_date,
@@ -203,8 +121,9 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
                     status=STATUS_ACTIVE,
                 )
 
-                # Store details in whatever fields your Token model actually has
-                _store_customer_details(token, name=name, phone=phone, address=address)
+                # store details (optional)
+                if (name or "").strip() or (phone or "").strip() or (address or "").strip():
+                    _store_customer_details(token, name=name, phone=phone, address=address)
 
                 return token
 
@@ -229,8 +148,9 @@ def public_clinic_page(request, slug):
 def public_clinic_snapshot(request, slug):
     service_date = timezone.localdate()
 
+    # ✅ FIX: only consider USED tokens that actually have used_at
     last_used = (
-        Token.objects.filter(service_date=service_date, status=STATUS_USED)
+        Token.objects.filter(service_date=service_date, status=STATUS_USED, used_at__isnull=False)
         .order_by("-used_at", "-id")
         .first()
     )
@@ -318,8 +238,9 @@ def public_token_status(request, token_id):
     token = get_object_or_404(Token, id=token_id)
     service_date = token.service_date
 
+    # ✅ FIX: only consider USED tokens that actually have used_at
     last_used = (
-        Token.objects.filter(service_date=service_date, status=STATUS_USED)
+        Token.objects.filter(service_date=service_date, status=STATUS_USED, used_at__isnull=False)
         .order_by("-used_at", "-id")
         .first()
     )
