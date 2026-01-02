@@ -55,9 +55,6 @@ def _set_first_existing_field(obj, candidates, value):
 
 
 def _get_token_details(token):
-    """
-    Read customer details from whichever fields exist in YOUR Token model.
-    """
     def first_attr(names, default=""):
         for n in names:
             if hasattr(token, n):
@@ -126,7 +123,6 @@ def issue_token(request):
         return JsonResponse({"ok": False, "error": "POST required"}, status=405)
 
     body = _read_json(request)
-
     counter_code = str(body.get("counter", "")).strip()
     if not counter_code:
         return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
@@ -161,7 +157,6 @@ def issue_token(request):
 # -------------------------
 # API: next token (call next)
 # POST {"counter":"A1"}
-# marks oldest ACTIVE token as USED
 # -------------------------
 @csrf_exempt
 def next_token(request):
@@ -169,7 +164,6 @@ def next_token(request):
         return JsonResponse({"ok": False, "error": "POST required"}, status=405)
 
     body = _read_json(request)
-
     counter_code = str(body.get("counter", "")).strip()
     if not counter_code:
         return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
@@ -219,9 +213,30 @@ def next_token(request):
 
 
 # -------------------------
+# API: token status by number  ✅ REQUIRED BY URLCONF
+# GET /api/token/status/<number>/
+# -------------------------
+@require_GET
+def token_status(request, number):
+    token = Token.objects.filter(number=number).first()
+    if not token:
+        return JsonResponse({"ok": False, "error": "Token not found"}, status=404)
+
+    details = _get_token_details(token)
+
+    return JsonResponse({
+        "ok": True,
+        "number": token.number,
+        "status": token.status,
+        "service_date": str(token.service_date),
+        "counter": token.counter.code if token.counter else None,
+        **details,
+    })
+
+
+# -------------------------
 # API: queue status
 # GET /api/queue/status/?counter=A1
-# returns waiting list with patient info
 # -------------------------
 @require_GET
 def queue_status(request):
@@ -240,15 +255,12 @@ def queue_status(request):
         counter = None
 
     active = base.filter(status=STATUS_ACTIVE).order_by("created_at", "id")
-    waiting_count = active.count()
-
     waiting_list = []
     for t in active[:50]:
         d = _get_token_details(t)
         waiting_list.append({
             "token_id": t.id,
             "number": t.number,
-            "created_at": t.created_at.isoformat() if getattr(t, "created_at", None) else None,
             "customer_name": d["customer_name"],
             "customer_phone": d["customer_phone"],
             "customer_address": d["customer_address"],
@@ -266,14 +278,14 @@ def queue_status(request):
         "service_date": str(service_date),
         "counter": counter.code if counter else None,
         "now_serving": last_used.number if last_used else None,
-        "waiting_count": waiting_count,
+        "waiting_count": active.count(),
         "next_token": waiting_list[0]["number"] if waiting_list else None,
         "waiting_list": waiting_list,
     })
 
 
 # -------------------------
-# Admin dashboard (custom)
+# Admin dashboard
 # -------------------------
 @login_required
 def admin_dashboard(request):
@@ -285,29 +297,24 @@ def admin_dashboard(request):
     waiting_tokens = today.filter(status=STATUS_ACTIVE).count()
 
     avg_wait = None
-    if total_tokens:
-        used_qs = today.filter(
-            status=STATUS_USED, used_at__isnull=False, created_at__isnull=False
-        ).annotate(
-            wait=ExpressionWrapper(F("used_at") - F("created_at"), output_field=DurationField())
-        )
-        if used_qs.exists():
-            avg = used_qs.aggregate(a=Avg("wait"))["a"]
-            if avg:
-                avg_wait = int(avg.total_seconds() // 60)
+    used_qs = today.filter(status=STATUS_USED, used_at__isnull=False, created_at__isnull=False).annotate(
+        wait=ExpressionWrapper(F("used_at") - F("created_at"), output_field=DurationField())
+    )
+    if used_qs.exists():
+        avg = used_qs.aggregate(a=Avg("wait"))["a"]
+        if avg:
+            avg_wait = int(avg.total_seconds() // 60)
 
     counters = Counter.objects.filter(is_active=True).order_by("code")
     per_counter = []
     for c in counters:
-        issued = today.filter(counter=c).count()
-        served = today.filter(counter=c, status=STATUS_USED).count()
-        waiting = today.filter(counter=c, status=STATUS_ACTIVE).count()
-        per_counter.append({"code": c.code, "name": c.name, "issued": issued, "served": served, "waiting": waiting})
-
-    unassigned_issued = today.filter(counter__isnull=True).count()
-    unassigned_served = today.filter(counter__isnull=True, status=STATUS_USED).count()
-    unassigned_waiting = today.filter(counter__isnull=True, status=STATUS_ACTIVE).count()
-    per_counter.append({"code": "(unassigned)", "name": "(unassigned)", "issued": unassigned_issued, "served": unassigned_served, "waiting": unassigned_waiting})
+        per_counter.append({
+            "code": c.code,
+            "name": c.name,
+            "issued": today.filter(counter=c).count(),
+            "served": today.filter(counter=c, status=STATUS_USED).count(),
+            "waiting": today.filter(counter=c, status=STATUS_ACTIVE).count(),
+        })
 
     return render(request, "core/admin_dashboard.html", {
         "service_date": service_date,
