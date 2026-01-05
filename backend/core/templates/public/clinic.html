@@ -6,23 +6,23 @@
   <title>Clinic Token Booking</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
 
-  <!-- Clean hospital-style font -->
+  <!-- Hospital-style font (with strong fallbacks) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 
   <style>
     :root{
-      --bg: #f6fbff;
+      --bg: #f3fbff;
       --card: #ffffff;
       --text: #0f172a;
       --muted: #475569;
-      --line: #e5eef7;
+      --line: #e4eff8;
 
       --brand: #0ea5a4;
       --brand2:#22c55e;
 
-      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      --shadow: 0 12px 28px rgba(15, 23, 42, 0.10);
       --radius: 18px;
     }
 
@@ -35,18 +35,18 @@
 
     body{
       margin:0;
-      font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       color: var(--text);
       background:
-        radial-gradient(900px 420px at 15% 0%, #e9fbff 0%, transparent 60%),
-        radial-gradient(900px 420px at 85% 0%, #e9fff4 0%, transparent 60%),
+        radial-gradient(900px 420px at 15% 0%, #e8fbff 0%, transparent 60%),
+        radial-gradient(900px 420px at 85% 0%, #e8fff3 0%, transparent 60%),
         linear-gradient(180deg, #ffffff, var(--bg));
     }
 
     .wrap{
-      max-width: 1100px;
+      max-width: 1120px;
       margin: 0 auto;
-      padding: 22px 18px 40px;
+      padding: 22px 16px 44px;
     }
 
     /* Header */
@@ -65,22 +65,22 @@
     }
 
     .logo{
-      width:48px;height:48px;
-      border-radius: 14px;
+      width:52px;height:52px;
+      border-radius: 16px;
       background: linear-gradient(135deg, rgba(14,165,164,1), rgba(34,197,94,1));
-      box-shadow: 0 10px 22px rgba(14,165,164,.20);
+      box-shadow: 0 12px 22px rgba(14,165,164,.22);
       display:grid;
       place-items:center;
       color:white;
-      font-weight:800;
-      letter-spacing:-.03em;
+      font-weight:900;
+      letter-spacing:-.04em;
       position:relative;
       overflow:hidden;
     }
     .logo:after{
       content:"";
-      position:absolute; inset:-40%;
-      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.28), transparent 55%);
+      position:absolute; inset:-50%;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.30), transparent 55%);
       transform: rotate(18deg);
     }
 
@@ -88,13 +88,14 @@
       margin:0;
       font-size: 20px;
       letter-spacing:-0.02em;
-      font-weight:800;
+      font-weight:900;
+      line-height:1.15;
     }
     .title p{
-      margin:4px 0 0;
+      margin:5px 0 0;
       color: var(--muted);
       font-size: 13px;
-      font-weight:600;
+      font-weight:700;
     }
 
     .chips{
@@ -110,11 +111,11 @@
       gap:8px;
       padding: 10px 12px;
       border-radius: 999px;
-      background: rgba(255,255,255,.8);
+      background: rgba(255,255,255,.85);
       border: 1px solid var(--line);
       box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
       font-size: 13px;
-      font-weight:700;
+      font-weight:800;
       color: var(--text);
     }
 
@@ -138,18 +139,19 @@
     }
 
     .quoteIcon{
-      width:44px;height:44px;border-radius: 14px;
-      background: rgba(34,197,94,.10);
-      border: 1px solid rgba(34,197,94,.18);
+      width:46px;height:46px;border-radius: 16px;
+      background: rgba(34,197,94,.12);
+      border: 1px solid rgba(34,197,94,.20);
       display:grid; place-items:center;
       flex: 0 0 auto;
+      font-size: 20px;
     }
 
     .quoteText{
       line-height: 1.25;
     }
     .quoteText .big{
-      font-weight: 800;
+      font-weight: 900;
       letter-spacing:-0.02em;
       font-size: 16px;
       margin: 0;
@@ -157,7 +159,7 @@
     .quoteText .small{
       margin: 6px 0 0;
       color: var(--muted);
-      font-weight: 700;
+      font-weight: 800;
       font-size: 13px;
     }
 
@@ -193,10 +195,10 @@
 
     .cardHead h2{
       margin:0;
-      font-size: 14px;
-      letter-spacing: 0.05em;
-      font-weight: 900;
-      color: #0b2a3c;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      font-weight: 950;
+      color: #083344;
     }
 
     .badge{
@@ -207,8 +209,8 @@
       border-radius: 999px;
       background: rgba(14,165,164,.08);
       border: 1px solid rgba(14,165,164,.16);
-      font-weight: 800;
-      color: #0b2a3c;
+      font-weight: 900;
+      color: #083344;
       font-size: 12px;
       white-space:nowrap;
     }
@@ -219,11 +221,11 @@
 
     /* Status card (left) */
     .bigToken{
-      font-size: 54px;
-      font-weight: 900;
+      font-size: 56px;
+      font-weight: 950;
       letter-spacing: -0.04em;
       margin: 6px 0 10px;
-      color: #0b2a3c;
+      color: #083344;
     }
 
     .metaRow{
@@ -233,7 +235,7 @@
       margin-top: 10px;
     }
     .mini{
-      flex: 1 1 180px;
+      flex: 1 1 190px;
       border: 1px solid var(--line);
       border-radius: 16px;
       padding: 12px;
@@ -242,17 +244,17 @@
     .mini .k{
       font-size: 12px;
       color: var(--muted);
-      font-weight: 800;
-      letter-spacing: .04em;
+      font-weight: 900;
+      letter-spacing: .06em;
       margin:0 0 4px;
       text-transform: uppercase;
     }
     .mini .v{
       font-size: 18px;
-      font-weight: 900;
+      font-weight: 950;
       letter-spacing:-0.02em;
       margin:0;
-      color:#0b2a3c;
+      color:#083344;
     }
 
     .progress{
@@ -275,7 +277,7 @@
       margin-top: 12px;
       color: var(--muted);
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 650;
       line-height:1.4;
     }
 
@@ -297,9 +299,9 @@
 
     label{
       font-size: 12px;
-      color: #0b2a3c;
-      font-weight: 900;
-      letter-spacing: .04em;
+      color: #083344;
+      font-weight: 950;
+      letter-spacing: .06em;
       text-transform: uppercase;
     }
 
@@ -317,7 +319,7 @@
     textarea{ min-height: 46px; resize: vertical; }
 
     input:focus, textarea:focus{
-      border-color: rgba(14,165,164,.55);
+      border-color: rgba(14,165,164,.60);
       box-shadow: 0 0 0 4px rgba(14,165,164,.12);
     }
 
@@ -325,7 +327,7 @@
       margin-top: 2px;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 750;
       line-height:1.35;
     }
 
@@ -340,7 +342,7 @@
       border: 0;
       border-radius: 14px;
       padding: 12px 14px;
-      font-weight: 900;
+      font-weight: 950;
       font-size: 15px;
       cursor: pointer;
       min-width: 160px;
@@ -358,7 +360,7 @@
     .ghost{
       background: #ffffff;
       border: 1px solid var(--line);
-      color: #0b2a3c;
+      color: #083344;
     }
 
     .msg{
@@ -367,7 +369,7 @@
       padding: 12px 12px;
       border: 1px solid var(--line);
       background: #fbfeff;
-      font-weight: 800;
+      font-weight: 850;
       font-size: 13px;
       color: var(--muted);
       display:none;
@@ -378,7 +380,7 @@
       display:block;
       border-color: rgba(34,197,94,.25);
       background: rgba(34,197,94,.07);
-      color: #0b2a3c;
+      color: #083344;
     }
     .msg.err{
       display:block;
@@ -398,29 +400,29 @@
 
     .yourToken .k{
       font-size: 12px;
-      letter-spacing: .04em;
+      letter-spacing: .06em;
       text-transform: uppercase;
-      font-weight: 900;
-      color: #0b2a3c;
+      font-weight: 950;
+      color: #083344;
       margin:0 0 6px;
     }
     .yourToken .num{
       font-size: 44px;
-      font-weight: 900;
+      font-weight: 950;
       letter-spacing:-0.03em;
       margin:0 0 8px;
-      color:#0b2a3c;
+      color:#083344;
     }
     .yourToken .sub{
       margin:0;
       color: var(--muted);
-      font-weight: 700;
+      font-weight: 750;
       font-size: 13px;
     }
     .trackLink{
       display:inline-flex;
       margin-top: 10px;
-      font-weight: 900;
+      font-weight: 950;
       color: #0ea5a4;
       text-decoration: none;
     }
@@ -430,16 +432,15 @@
       margin-top: 12px;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 650;
       line-height: 1.35;
     }
 
-    /* Tiny footer */
     .footer{
       margin-top: 14px;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 800;
       text-align:center;
     }
   </style>
@@ -447,44 +448,40 @@
 
 <body>
   <div class="wrap">
-    <!-- Header -->
     <div class="topbar">
       <div class="brand">
         <div class="logo" aria-hidden="true">+</div>
         <div class="title">
-          <h1>Clinic Token Booking</h1>
-          <p>Reception-style booking • Live queue updates</p>
+          <h1>Clinic Reception — Token Booking</h1>
+          <p>Book your token • Track live queue • Simple & fast</p>
         </div>
       </div>
 
       <div class="chips">
         <div class="chip"><span style="opacity:.7">Clinic:</span> <span id="clinicChip">—</span></div>
-        <div class="chip"><span class="liveDot"></span> Live</div>
+        <div class="chip"><span class="liveDot"></span> Live Updates</div>
       </div>
     </div>
 
-    <!-- Quote banner -->
     <div class="quote" role="note" aria-label="Health tip">
-      <div class="quoteIcon" aria-hidden="true">💚</div>
+      <div class="quoteIcon" aria-hidden="true">🏥</div>
       <div class="quoteText">
         <p class="big" id="quoteBig">Good health is a journey, not a destination.</p>
         <p class="small" id="quoteSmall">— Stay consistent</p>
       </div>
     </div>
 
-    <!-- Main grid -->
     <div class="grid">
-      <!-- Left: Queue status -->
       <div class="card">
         <div class="cardHead">
           <h2>QUEUE STATUS</h2>
-          <div class="badge" id="refreshBadge">Auto-refresh</div>
+          <div class="badge" id="refreshBadge">Auto-refresh (3s)</div>
         </div>
 
         <div class="cardBody">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
             <div>
-              <div style="font-weight:900; letter-spacing:.05em; text-transform:uppercase; font-size:12px; color:var(--muted);">
+              <div style="font-weight:950; letter-spacing:.06em; text-transform:uppercase; font-size:12px; color:var(--muted);">
                 Now serving
               </div>
               <div class="bigToken" id="nowServing">—</div>
@@ -509,16 +506,15 @@
           </div>
 
           <div class="hint" id="hintText">
-            This page updates automatically. Reserve your token and keep this tab open to track your turn.
+            This screen updates automatically. Reserve your token and keep this page open to track your turn.
           </div>
         </div>
       </div>
 
-      <!-- Right: Reserve form -->
       <div class="card">
         <div class="cardHead">
           <h2>PATIENT REGISTRATION</h2>
-          <div class="badge">Quick form</div>
+          <div class="badge">Reception form</div>
         </div>
 
         <div class="cardBody">
@@ -569,7 +565,6 @@
   <script>
     const CLINIC_SLUG = "{{ clinic_slug|default:'' }}";
 
-    // Quotes / tips (non-medical, motivational)
     const QUOTES = [
       { big: "Good health is a journey, not a destination.", small: "— Stay consistent" },
       { big: "Small steps today make a healthier tomorrow.", small: "— One step at a time" },
@@ -632,7 +627,7 @@
     }
 
     async function getJson(url){
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: "no-store" });
       const txt = await res.text();
       let j = null;
       try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error: txt || ("HTTP "+res.status) }; }
@@ -660,17 +655,15 @@
         document.getElementById("peopleWaiting").textContent = `People waiting: ${j.people_waiting ?? "—"}`;
         document.getElementById("estWait").textContent = (j.estimated_wait_min ?? 0);
 
-        // Progress bar: if estimated wait is 0 => full, else scaled (cap at 100)
         const wait = Number(j.estimated_wait_min ?? 0);
         let pct = 100;
         if (wait > 0){
-          // assume 0..30 minutes typical for UI scaling
           pct = Math.max(5, Math.min(100, 100 - (wait/30)*100));
         }
         document.getElementById("progressBar").style.width = pct.toFixed(0) + "%";
       }catch(e){
-        // keep UI stable; show minimal hint only
-        document.getElementById("hintText").textContent = "Live updates are temporarily unavailable. Please refresh the page.";
+        document.getElementById("hintText").textContent =
+          "Live updates are temporarily unavailable. Please refresh the page.";
       }
     }
 
@@ -679,8 +672,8 @@
       disableReserve(true);
 
       const name = (document.getElementById("name").value || "").trim();
-      const phoneRaw = document.getElementById("phone").value || "";
-      const phone = normalizePhone(phoneRaw);
+      const phoneInput = document.getElementById("phone").value || "";
+      const phoneDigits = normalizePhone(phoneInput);
       const address = (document.getElementById("address").value || "").trim();
 
       if(!name){
@@ -688,7 +681,7 @@
         disableReserve(false);
         return;
       }
-      if(!phone || !( (phone.length === 10) || (phone.startsWith("91") && phone.length === 12) )){
+      if(!phoneDigits || !( (phoneDigits.length === 10) || (phoneDigits.startsWith("91") && phoneDigits.length === 12) )){
         setMsg("Please enter a valid mobile number (10 digits or 91XXXXXXXXXX or +91XXXXXXXXXX).", false);
         disableReserve(false);
         return;
@@ -696,12 +689,13 @@
 
       try{
         const j = await postJson(`/api/public/clinic/${encodeURIComponent(CLINIC_SLUG)}/reserve/`, {
-          name, phone: phoneRaw, address
+          name,
+          phone: phoneDigits,   // ✅ always send digits only (best for backend)
+          address
         });
 
         setMsg(`Reserved successfully. Your token is ${j.token_number}.`, true);
 
-        // Show token card + tracking link
         const box = document.getElementById("yourTokenBox");
         document.getElementById("yourTokenNum").textContent = j.token_number || "—";
         const trackUrl = (j.track_url || "");
@@ -711,7 +705,6 @@
         link.style.opacity = trackUrl ? "1" : "0.6";
         box.style.display = "block";
 
-        // Update snapshot immediately
         await refreshSnapshot();
 
       }catch(e){
@@ -722,7 +715,6 @@
       }
     }
 
-    // init
     document.getElementById("clinicChip").textContent = CLINIC_SLUG || "—";
     setQuote();
     refreshSnapshot();
