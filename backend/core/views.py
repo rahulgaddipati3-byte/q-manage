@@ -11,6 +11,9 @@ from django.db.models import (
     IntegerField,
     Max,
     Q,
+    Case,
+    When,
+    Value,
 )
 from django.db.models.functions import Substr, Cast
 from django.http import JsonResponse
@@ -224,29 +227,28 @@ def next_token(request):
     service_date = timezone.localdate()
 
     with transaction.atomic():
-        # Prefer unassigned first, then counter-assigned
-        token = (
+        # ✅ Build one base queryset with an annotation so ordering works
+        base = (
             Token.objects.select_for_update()
             .filter(service_date=service_date, status=STATUS_ACTIVE)
             .filter(Q(counter__isnull=True) | Q(counter=counter))
-            .order_by("counter__isnull", "sequence", "id")  # counter__isnull False first?
+            .annotate(
+                unassigned_first=Case(
+                    When(counter__isnull=True, then=Value(1)),
+                    default=Value(0),
+                    output_field=IntegerField(),
+                )
+            )
+            .order_by("-unassigned_first", "sequence", "id")
         )
 
-        # The above order_by makes counter__isnull False first (because False < True).
-        # We want UNASSIGNED first, so flip:
-        token = token.order_by("-counter__isnull", "sequence", "id").first()
+        token = base.first()
 
         # Expire any expired tokens (if model supports is_expired())
         while token and hasattr(token, "is_expired") and callable(getattr(token, "is_expired")) and token.is_expired():
             token.status = STATUS_EXPIRED
             token.save(update_fields=["status"])
-            token = (
-                Token.objects.select_for_update()
-                .filter(service_date=service_date, status=STATUS_ACTIVE)
-                .filter(Q(counter__isnull=True) | Q(counter=counter))
-                .order_by("-counter__isnull", "sequence", "id")
-                .first()
-            )
+            token = base.first()
 
         if not token:
             return JsonResponse({"ok": False, "error": "No active tokens"}, status=404)
@@ -258,9 +260,7 @@ def next_token(request):
         token.status = STATUS_USED
         used_at_changed = _set_used_at_if_exists(token)
 
-        fields = ["status"]
-        if token.counter_id:
-            fields.append("counter")
+        fields = ["status", "counter"]
         if used_at_changed:
             fields.append("used_at")
 
@@ -305,10 +305,6 @@ def token_status(request, number):
 # -------------------------
 # API: queue status
 # GET /api/queue/status/?counter=A1
-#
-# ✅ FIX: If counter specified, it should show tokens that are:
-#   - assigned to that counter
-#   - OR unassigned (since that counter can pull them next)
 # -------------------------
 @require_GET
 def queue_status(request):
@@ -324,6 +320,7 @@ def queue_status(request):
         except Counter.DoesNotExist:
             return JsonResponse({"ok": False, "error": "Counter not found"}, status=404)
 
+        # counter can consume unassigned too
         base = base.filter(Q(counter=counter) | Q(counter__isnull=True))
 
     active = base.filter(status=STATUS_ACTIVE).order_by("sequence", "id")
@@ -341,11 +338,12 @@ def queue_status(request):
             "counter": t.counter.code if t.counter else None,
         })
 
-    last_used = (
-        base.filter(status=STATUS_USED)
-        .exclude(used_at__isnull=True) if "used_at" in _token_field_names(Token) else base.filter(status=STATUS_USED)
-    )
-    last_used = last_used.order_by("-used_at", "-id").first() if "used_at" in _token_field_names(Token) else last_used.order_by("-id").first()
+    # ✅ safer "last used"
+    used = base.filter(status=STATUS_USED)
+    if "used_at" in _token_field_names(Token):
+        last_used = used.filter(used_at__isnull=False).order_by("-used_at", "-id").first()
+    else:
+        last_used = used.order_by("-id").first()
 
     return JsonResponse({
         "ok": True,
@@ -365,7 +363,6 @@ def queue_status(request):
 def admin_dashboard(request):
     service_date = timezone.localdate()
 
-    # ✅ Robust "today" set (service_date OR fallback if service_date missing)
     today = _today_queryset()
 
     total_tokens = today.count()
@@ -389,7 +386,6 @@ def admin_dashboard(request):
     counters = Counter.objects.filter(is_active=True).order_by("code")
 
     per_counter = []
-    # ✅ Include unassigned row first
     per_counter.append({
         "code": None,
         "name": "(unassigned)",
