@@ -102,10 +102,11 @@ def _today_queryset():
     (helps if older records were created without service_date).
     """
     service_date = timezone.localdate()
-    return (
-        Token.objects.filter(service_date=service_date)
-        | Token.objects.filter(service_date__isnull=True, created_at__date=service_date)
-    )
+    return Token.objects.filter(
+        Q(service_date=service_date) |
+        Q(service_date__isnull=True, created_at__date=service_date)
+    ).distinct()
+
 
 
 def _issue_token_for_today(*, counter=None, name="", phone="", address="") -> Token:
