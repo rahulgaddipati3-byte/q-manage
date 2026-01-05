@@ -1,220 +1,571 @@
+\{# backend/core/templates/core/counter.html #}
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>Counter Screen</title>
+  <title>Reception Counter (Staff)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+
+  <!-- Hospital-style font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+
   <style>
-    body { font-family: Arial, sans-serif; padding: 18px; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    select, button, input, textarea { font-size: 16px; padding: 10px; }
-    button { cursor: pointer; }
-    .card { margin-top: 14px; padding: 14px; border: 1px solid #ddd; border-radius: 10px; }
-    .big { font-size: 44px; font-weight: 700; margin: 10px 0; }
-    .muted { color:#666; }
-    .ok { color: green; }
-    .err { color: #b00020; white-space: pre-wrap; word-break: break-word; }
-    table { width:100%; border-collapse: collapse; margin-top:10px; }
-    th, td { border-bottom:1px solid #eee; padding:8px; text-align:left; font-size:14px; vertical-align: top; }
-    th { background:#fafafa; }
-    .pill { padding:2px 8px; border-radius:999px; background:#f2f2f2; display:inline-block; }
-    .right { margin-left:auto; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
-    .grid textarea { grid-column: 1 / -1; }
-    @media (max-width: 680px){ .grid { grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-  <h2>Counter Screen (Staff)</h2>
+    :root{
+      --bg: #f6fbff;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --line: #e5eef7;
 
-  <div class="row">
-    <label><b>Counter:</b></label>
-    <select id="counter">
-      {% for c in counters %}
-        <option value="{{ c.code }}">{{ c.code }} - {{ c.name }}</option>
-      {% endfor %}
-    </select>
+      --brand: #0ea5a4;   /* teal */
+      --brand2:#22c55e;   /* green */
+      --danger:#ef4444;
 
-    <button onclick="issueToken()">Issue Token</button>
-    <button onclick="callNext()">Call Next</button>
-
-    <a href="/ui/display/" target="_blank" style="margin-left:12px;">Open Customer Display</a>
-    <a href="/admin-dashboard/" target="_blank" style="margin-left:12px;">Open Admin Dashboard</a>
-
-    <span class="right muted" id="clock">—</span>
-  </div>
-
-  <!-- ✅ NEW: Staff can enter patient details when issuing token -->
-  <div class="card">
-    <div class="muted"><b>Patient Details (optional)</b></div>
-    <div class="grid" style="margin-top:10px;">
-      <input id="p_name" placeholder="Patient name"/>
-      <input id="p_phone" placeholder="Phone"/>
-      <textarea id="p_address" placeholder="Address"></textarea>
-    </div>
-    <div class="muted" style="margin-top:8px;">
-      If left empty, token will be issued without details.
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="muted">Last action</div>
-    <div id="msg" class="muted">—</div>
-    <div class="big" id="big">—</div>
-  </div>
-
-  <div class="card">
-    <div class="muted"><b>Queue (This Counter)</b></div>
-    <div class="muted" id="qmsg">Loading…</div>
-
-    <table>
-      <thead>
-        <tr>
-          <th>Token</th>
-          <th>Name</th>
-          <th>Phone</th>
-          <th>Address</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="qbody"></tbody>
-    </table>
-  </div>
-
-<script>
-async function postJson(url, data){
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
-
-  const txt = await res.text();
-  let j = null;
-  try { j = JSON.parse(txt); }
-  catch(e) { j = { ok:false, error: txt || `HTTP ${res.status}` }; }
-
-  if (!res.ok) throw { status: res.status, ...j };
-  return j;
-}
-
-async function getJson(url){
-  const res = await fetch(url, { cache: "no-store" });
-  const txt = await res.text();
-  let j = null;
-  try { j = JSON.parse(txt); }
-  catch(e) { j = { ok:false, error: txt || `HTTP ${res.status}` }; }
-  if (!res.ok) throw { status: res.status, ...j };
-  return j;
-}
-
-function getCounter(){
-  return document.getElementById("counter").value;
-}
-
-function setMsg(text, ok=true){
-  const el = document.getElementById("msg");
-  el.className = ok ? "ok" : "err";
-  el.textContent = text;
-}
-
-function esc(s){
-  return (s || "").toString().replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
-
-function getPatientInputs(){
-  return {
-    name: (document.getElementById("p_name").value || "").trim(),
-    phone: (document.getElementById("p_phone").value || "").trim(),
-    address: (document.getElementById("p_address").value || "").trim(),
-  };
-}
-
-function clearPatientInputs(){
-  document.getElementById("p_name").value = "";
-  document.getElementById("p_phone").value = "";
-  document.getElementById("p_address").value = "";
-}
-
-async function issueToken(){
-  const code = getCounter();
-  const p = getPatientInputs();
-
-  try{
-    const j = await postJson("/api/token/issue/", {
-      counter: code,
-      name: p.name,
-      phone: p.phone,
-      address: p.address
-    });
-
-    setMsg(`Issued token: ${j.number}`, true);
-    document.getElementById("big").textContent = j.number;
-
-    // optional: clear after issue
-    clearPatientInputs();
-
-    await loadQueue();
-  }catch(e){
-    setMsg((e.error || "Issue failed") + (e.status ? ` (HTTP ${e.status})` : ""), false);
-  }
-}
-
-async function callNext(){
-  const code = getCounter();
-  try{
-    const j = await postJson("/api/token/next/", { counter: code });
-    setMsg(`Now serving at ${j.counter}: ${j.number}`, true);
-    document.getElementById("big").textContent = j.number;
-    await loadQueue();
-  }catch(e){
-    setMsg((e.error || "Call next failed") + (e.status ? ` (HTTP ${e.status})` : ""), false);
-  }
-}
-
-async function loadQueue(){
-  const code = getCounter();
-  const msg = document.getElementById("qmsg");
-  const body = document.getElementById("qbody");
-
-  try{
-    const j = await getJson(`/api/queue/status/?counter=${encodeURIComponent(code)}`);
-    const rows = (j.waiting_list || []);
-
-    msg.textContent =
-      `Now serving: ${j.now_serving || "—"} | Waiting: ${j.waiting_count || 0} | Next: ${j.next_token || "—"}`;
-
-    body.innerHTML = rows.map(r => `
-      <tr>
-        <td><b>${esc(r.number)}</b></td>
-        <td>${esc(r.customer_name)}</td>
-        <td>${esc(r.customer_phone)}</td>
-        <td>${esc(r.customer_address)}</td>
-        <td><span class="pill">${esc((r.status || "ACTIVE").toUpperCase())}</span></td>
-      </tr>
-    `).join("");
-
-    if (!rows.length){
-      body.innerHTML = `<tr><td colspan="5" class="muted">No active tokens for this counter.</td></tr>`;
+      --shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
     }
 
-  }catch(e){
-    msg.textContent = "Could not load queue. Check /api/queue/status/ endpoint.";
-    body.innerHTML = `<tr><td colspan="5" class="err">Error loading queue</td></tr>`;
-  }
-}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(900px 420px at 15% 0%, #e9fbff 0%, transparent 60%),
+        radial-gradient(900px 420px at 85% 0%, #e9fff4 0%, transparent 60%),
+        linear-gradient(180deg, #ffffff, var(--bg));
+    }
 
-function tickClock(){
-  document.getElementById("clock").textContent = new Date().toLocaleString();
-}
+    .wrap{
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 22px 18px 40px;
+    }
 
-document.getElementById("counter").addEventListener("change", loadQueue);
+    /* Topbar */
+    .topbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-bottom: 16px;
+    }
 
-tickClock();
-setInterval(tickClock, 1000);
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+    .logo{
+      width:48px;height:48px;border-radius:14px;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 10px 22px rgba(14,165,164,.18);
+      display:grid; place-items:center;
+      color:#fff;
+      font-weight:900;
+      letter-spacing:-.03em;
+      position:relative;
+      overflow:hidden;
+    }
+    .logo:after{
+      content:"";
+      position:absolute; inset:-40%;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.28), transparent 55%);
+      transform: rotate(18deg);
+    }
 
-loadQueue();
-setInterval(loadQueue, 3000);
-</script>
+    .title h1{
+      margin:0;
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing:-0.02em;
+    }
+    .title p{
+      margin:4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .chips{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+    }
+    .chip{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 10px 12px;
+      border-radius:999px;
+      background: rgba(255,255,255,.85);
+      border:1px solid var(--line);
+      box-shadow: 0 8px 18px rgba(15,23,42,0.05);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .dot{
+      width:10px;height:10px;border-radius:999px;
+      background: var(--brand2);
+      box-shadow: 0 0 0 6px rgba(34,197,94,.15);
+    }
+
+    /* Layout grid */
+    .grid{
+      display:grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 16px;
+      align-items:start;
+    }
+    @media (max-width: 980px){
+      .grid{grid-template-columns:1fr}
+    }
+
+    .card{
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .cardHead{
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .cardHead h2{
+      margin:0;
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: .06em;
+      color: #0b2a3c;
+      text-transform: uppercase;
+    }
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 8px 10px;
+      border-radius:999px;
+      background: rgba(14,165,164,.08);
+      border: 1px solid rgba(14,165,164,.16);
+      color:#0b2a3c;
+      font-size: 12px;
+      font-weight: 900;
+      white-space:nowrap;
+    }
+
+    .cardBody{ padding: 16px; }
+
+    /* Controls area */
+    .controls{
+      display:flex;
+      gap: 12px;
+      flex-wrap:wrap;
+      align-items:end;
+    }
+
+    label{
+      display:block;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+      color:#0b2a3c;
+      margin-bottom:6px;
+    }
+
+    select, input, textarea{
+      font-family: inherit;
+      font-size: 15px;
+      padding: 12px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      outline: none;
+      background: #ffffff;
+      color: var(--text);
+    }
+    textarea{ min-height: 48px; resize: vertical; }
+    select:focus, input:focus, textarea:focus{
+      border-color: rgba(14,165,164,.55);
+      box-shadow: 0 0 0 4px rgba(14,165,164,.12);
+    }
+
+    .field{ flex: 1 1 240px; min-width: 240px; }
+
+    .btnRow{ display:flex; gap: 12px; flex-wrap:wrap; }
+    .btn{
+      border:0;
+      border-radius: 14px;
+      padding: 12px 16px;
+      font-weight: 900;
+      font-size: 15px;
+      cursor: pointer;
+      min-width: 170px;
+      transition: transform .05s ease, filter .15s ease;
+    }
+    .btn:active{ transform: translateY(1px); }
+    .primary{
+      color:#fff;
+      background: linear-gradient(180deg, #14b8a6, #0ea5a4);
+      box-shadow: 0 14px 26px rgba(14,165,164,.18);
+    }
+    .primary:hover{ filter: brightness(1.02); }
+    .secondary{
+      color:#0b2a3c;
+      background: #ffffff;
+      border: 1px solid var(--line);
+    }
+    .danger{
+      color:#fff;
+      background: linear-gradient(180deg, #fb7185, #ef4444);
+      box-shadow: 0 14px 26px rgba(239,68,68,.18);
+    }
+
+    .links{
+      display:flex;
+      gap: 14px;
+      flex-wrap:wrap;
+      margin-top: 10px;
+      font-weight: 900;
+      font-size: 13px;
+    }
+    .links a{
+      color: var(--brand);
+      text-decoration:none;
+    }
+    .links a:hover{ text-decoration:underline; }
+
+    /* Now serving panel */
+    .nowServing{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      flex-wrap:wrap;
+    }
+    .bigToken{
+      font-size: 58px;
+      font-weight: 900;
+      letter-spacing:-0.04em;
+      margin: 6px 0 0;
+      color:#0b2a3c;
+    }
+    .smallMeta{
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 13px;
+      margin-top: 6px;
+      line-height:1.35;
+    }
+
+    /* Queue table */
+    table{
+      width:100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow:hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: linear-gradient(180deg,#fff,#fbfeff);
+    }
+    th, td{
+      padding: 12px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+    th{
+      text-align:left;
+      font-size: 12px;
+      letter-spacing:.06em;
+      text-transform:uppercase;
+      color:#0b2a3c;
+      font-weight: 900;
+      background: #f7fbff;
+    }
+    tr:last-child td{ border-bottom:0; }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 900;
+      border: 1px solid var(--line);
+      background: rgba(14,165,164,.08);
+      color:#0b2a3c;
+    }
+
+    .footer{
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-align:center;
+    }
+
+    /* Make existing server-rendered bits still look okay */
+    .lastAction{
+      font-weight: 800;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">+</div>
+        <div class="title">
+          <h1>Reception Counter (Staff)</h1>
+          <p>Issue tokens • Call next patient • Live queue view</p>
+        </div>
+      </div>
+
+      <div class="chips">
+        <div class="chip"><span style="opacity:.7">Date:</span> {{ now|date:"d/m/Y, H:i:s" }}</div>
+        <div class="chip"><span class="dot"></span> Live</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- LEFT: Controls + Patient details -->
+      <div class="card">
+        <div class="cardHead">
+          <h2>Counter controls</h2>
+          <div class="badge">Staff only</div>
+        </div>
+        <div class="cardBody">
+
+          <div class="controls">
+            <div class="field">
+              <label for="counterSelect">Counter</label>
+              {# existing server renders counter dropdown usually as "counters" + "selected" #}
+              <select id="counterSelect" name="counter">
+                {% for c in counters %}
+                  <option value="{{ c.code }}" {% if selected_counter and selected_counter.code == c.code %}selected{% endif %}>
+                    {{ c.code }} - {{ c.name|default:c.code }}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+
+            <div class="btnRow">
+              <button class="btn primary" id="issueBtn" type="button">Issue Token</button>
+              <button class="btn secondary" id="nextBtn" type="button">Call Next</button>
+            </div>
+          </div>
+
+          <div class="links">
+            <a href="/ui/display/" target="_blank" rel="noopener">Open Customer Display</a>
+            <a href="/admin-dashboard/" target="_blank" rel="noopener">Open Admin Dashboard</a>
+          </div>
+
+          <div style="height:14px"></div>
+
+          <div class="card" style="box-shadow:none; border-radius:16px;">
+            <div class="cardHead">
+              <h2>Patient details (optional)</h2>
+              <div class="badge">Attach to token</div>
+            </div>
+            <div class="cardBody">
+              <div class="controls" style="align-items:stretch">
+                <div class="field" style="min-width:260px">
+                  <label for="pName">Patient name</label>
+                  <input id="pName" type="text" placeholder="Full name" autocomplete="name">
+                </div>
+                <div class="field" style="min-width:220px">
+                  <label for="pPhone">Phone</label>
+                  <input id="pPhone" type="tel" placeholder="10 digits / +91..." autocomplete="tel">
+                </div>
+              </div>
+
+              <div style="margin-top:12px">
+                <label for="pAddr">Address</label>
+                <textarea id="pAddr" placeholder="Area / Landmark (optional)" autocomplete="street-address"></textarea>
+                <div class="smallMeta">If left empty, token will be issued without details.</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- RIGHT: Now Serving + Queue -->
+      <div class="card">
+        <div class="cardHead">
+          <h2>Queue (this counter)</h2>
+          <div class="badge" id="queueMeta">Loading…</div>
+        </div>
+
+        <div class="cardBody">
+          <div class="nowServing">
+            <div>
+              <div style="font-weight:900; letter-spacing:.06em; text-transform:uppercase; font-size:12px; color:var(--muted);">
+                Now serving
+              </div>
+              <div class="bigToken" id="nowServing">—</div>
+              <div class="smallMeta" id="lastAction">Last action: —</div>
+            </div>
+            <div>
+              <div class="pill" id="nextToken">Next: —</div>
+              <div style="height:10px"></div>
+              <div class="pill" id="waitingCount">Waiting: —</div>
+            </div>
+          </div>
+
+          <div style="height:14px"></div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Token</th>
+                <th>Name</th>
+                <th>Phone</th>
+                <th>Address</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="queueBody">
+              <tr><td colspan="5" style="color:var(--muted); font-weight:700;">Loading queue…</td></tr>
+            </tbody>
+          </table>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">Q-Manage • Reception Counter</div>
+  </div>
+
+  <script>
+    function qs(id){ return document.getElementById(id); }
+
+    function selectedCounter(){
+      return (qs("counterSelect")?.value || "").trim();
+    }
+
+    function normalizePhone(p){
+      if(!p) return "";
+      p = (""+p).trim().replace(/\s+/g,"");
+      // keep + for user entry, backend can normalize; just send raw
+      return p;
+    }
+
+    async function postJson(url, data){
+      const res = await fetch(url, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(data || {})
+      });
+      const txt = await res.text();
+      let j = null;
+      try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error: txt || ("HTTP "+res.status) }; }
+      if(!res.ok) throw { status: res.status, ...j };
+      return j;
+    }
+
+    async function getJson(url){
+      const res = await fetch(url);
+      const txt = await res.text();
+      let j = null;
+      try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error: txt || ("HTTP "+res.status) }; }
+      if(!res.ok) throw { status: res.status, ...j };
+      return j;
+    }
+
+    function renderQueue(list){
+      const body = qs("queueBody");
+      if(!list || !list.length){
+        body.innerHTML = `<tr><td colspan="5" style="color:var(--muted); font-weight:700;">No waiting patients.</td></tr>`;
+        return;
+      }
+
+      body.innerHTML = list.map(x => `
+        <tr>
+          <td style="font-weight:900; color:#0b2a3c;">${x.number || ""}</td>
+          <td>${(x.customer_name || "").toString()}</td>
+          <td>${(x.customer_phone || "").toString()}</td>
+          <td style="max-width:260px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            ${(x.customer_address || "").toString()}
+          </td>
+          <td><span class="pill">${(x.status || "").toString().toUpperCase()}</span></td>
+        </tr>
+      `).join("");
+    }
+
+    async function refreshQueue(){
+      const c = selectedCounter();
+      if(!c) return;
+
+      try{
+        const j = await getJson(`/api/queue/status/?counter=${encodeURIComponent(c)}`);
+        qs("nowServing").textContent = j.now_serving || "—";
+        qs("waitingCount").textContent = `Waiting: ${j.waiting_count ?? "—"}`;
+        qs("nextToken").textContent = `Next: ${j.next_token ?? "—"}`;
+        qs("queueMeta").textContent = `Counter ${c}`;
+
+        renderQueue(j.waiting_list || []);
+      }catch(e){
+        qs("queueMeta").textContent = "Offline";
+      }
+    }
+
+    async function issueToken(){
+      const c = selectedCounter();
+      if(!c) return;
+
+      const name = (qs("pName").value || "").trim();
+      const phone = normalizePhone(qs("pPhone").value || "");
+      const address = (qs("pAddr").value || "").trim();
+
+      // We send patient details; backend must accept these fields in issue_token handler.
+      // If backend ignores them, token will be issued but details won’t store.
+      try{
+        const j = await postJson(`/api/token/issue/`, { counter: c, name, phone, address });
+        qs("lastAction").textContent = `Last action: Issued token ${j.number}`;
+        // clear after issue (optional)
+        qs("pName").value = "";
+        qs("pPhone").value = "";
+        qs("pAddr").value = "";
+        await refreshQueue();
+      }catch(e){
+        qs("lastAction").textContent = `Last action: Issue failed (${e.error || "error"})`;
+      }
+    }
+
+    async function callNext(){
+      const c = selectedCounter();
+      if(!c) return;
+
+      try{
+        const j = await postJson(`/api/token/next/`, { counter: c });
+        qs("lastAction").textContent = `Last action: Now serving ${j.number}`;
+        await refreshQueue();
+      }catch(e){
+        qs("lastAction").textContent = `Last action: Call next failed (${e.error || "error"})`;
+      }
+    }
+
+    // Wire buttons
+    qs("issueBtn").addEventListener("click", issueToken);
+    qs("nextBtn").addEventListener("click", callNext);
+    qs("counterSelect").addEventListener("change", refreshQueue);
+
+    // Initial + auto refresh
+    refreshQueue();
+    setInterval(refreshQueue, 3000);
+  </script>
 </body>
 </html>
