@@ -1,73 +1,327 @@
 {% load static %}
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Admin Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <style>
-    body { margin:0; font-family: Arial, sans-serif; background:#0b0b0b; color:#fff; }
-    .wrap { max-width: 1100px; margin: 30px auto; padding: 0 20px; }
-    .card { background: rgba(255,255,255,0.06); border-radius: 16px; padding: 20px; margin: 18px 0; }
-    h1 { margin: 20px 0 10px; font-size: 56px; }
-    .muted { color: #b7b7b7; }
-    a { color:#53a7ff; text-decoration: underline; }
-    table { width:100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { text-align:left; padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    @media(max-width:800px){ .grid{ grid-template-columns:1fr; } h1{ font-size:40px; } }
+    :root{
+      --bg:#f5f7fb;
+      --card:#ffffff;
+      --text:#101828;
+      --muted:#667085;
+      --line:#eaecf0;
+      --brand:#0ea5a4;     /* teal */
+      --brand2:#2563eb;    /* blue */
+      --ok:#16a34a;
+      --warn:#f59e0b;
+      --danger:#ef4444;
+      --shadow: 0 10px 30px rgba(16,24,40,0.08);
+      --radius: 18px;
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .wrap{
+      max-width: 1180px;
+      margin: 28px auto;
+      padding: 0 18px 40px;
+    }
+
+    .topbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+
+    .logo{
+      width:44px; height:44px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: var(--shadow);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      color:white;
+      font-weight:800;
+      letter-spacing:0.5px;
+    }
+
+    h1{
+      margin:0;
+      font-size: 28px;
+      line-height: 1.1;
+      letter-spacing: -0.4px;
+    }
+
+    .sub{
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+
+    .actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+    }
+
+    a.btn{
+      text-decoration:none;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 14px;
+      box-shadow: 0 2px 10px rgba(16,24,40,0.04);
+    }
+
+    a.btn.primary{
+      background: var(--brand);
+      border-color: transparent;
+      color: #fff;
+    }
+
+    a.btn:hover{
+      filter: brightness(0.98);
+      transform: translateY(-1px);
+      transition: 0.15s ease;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .card{
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .card h2{
+      margin: 0 0 10px;
+      font-size: 16px;
+      color: var(--text);
+    }
+
+    .summary{
+      display:grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .metric{
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .metric .label{
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+
+    .pill{
+      width:10px; height:10px;
+      border-radius: 999px;
+      display:inline-block;
+    }
+    .pill.blue{ background: var(--brand2); }
+    .pill.teal{ background: var(--brand); }
+    .pill.green{ background: var(--ok); }
+    .pill.amber{ background: var(--warn); }
+
+    .metric .value{
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.6px;
+    }
+
+    .metric .hint{
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table{
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      overflow:hidden;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .table th, .table td{
+      text-align:left;
+      padding: 12px 12px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      vertical-align: middle;
+    }
+
+    .table th{
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      background: #fbfcfe;
+    }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      font-weight: 700;
+      font-size: 12px;
+      background: #fff;
+    }
+
+    .dot{
+      width:8px; height:8px;
+      border-radius: 999px;
+      background: var(--muted);
+    }
+    .dot.teal{ background: var(--brand); }
+    .dot.blue{ background: var(--brand2); }
+
+    .muted{ color: var(--muted); }
+
+    .empty{
+      padding: 14px;
+      border: 1px dashed var(--line);
+      border-radius: 16px;
+      background: #fff;
+      color: var(--muted);
+      margin-top: 10px;
+      font-size: 14px;
+    }
+
+    @media (max-width: 980px){
+      .grid{ grid-template-columns: 1fr; }
+      .summary{ grid-template-columns: 1fr 1fr; }
+      .actions{ justify-content:flex-start; }
+    }
+
+    @media (max-width: 520px){
+      .summary{ grid-template-columns: 1fr; }
+      a.btn{ width:100%; text-align:center; }
+    }
   </style>
 </head>
 
 <body>
   <div class="wrap">
 
-    <div style="margin-bottom:12px;">
-      <a href="/users/new/">+ Create Staff User</a>
-      <span class="muted" style="margin-left:12px;">Date: {{ today|date:"d/m/Y" }}</span>
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo">QM</div>
+        <div>
+          <h1>Admin Dashboard</h1>
+          <div class="sub">
+            Service Date: <strong>{{ service_date|date:"d M Y" }}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <a class="btn" href="/ui/counter/">Counter Screen</a>
+        <a class="btn" href="/ui/display/">Customer Display</a>
+        <a class="btn primary" href="/users/new/">+ Create Staff User</a>
+      </div>
     </div>
 
-    <h1>Admin Dashboard</h1>
-
     <div class="card">
-      <h2 style="margin-top:0;">Today Summary</h2>
+      <h2>Today Summary</h2>
 
-      <p class="muted">Total Tokens:
-        <strong style="color:#fff;">{{ issued|default:0 }}</strong>
-      </p>
+      <div class="summary">
+        <div class="metric">
+          <div class="label"><span class="pill teal"></span>Total Tokens</div>
+          <div class="value">{{ total_tokens|default:0 }}</div>
+          <div class="hint">All tokens created for today</div>
+        </div>
 
-      <p class="muted">Served Tokens:
-        <strong style="color:#fff;">{{ served|default:0 }}</strong>
-      </p>
+        <div class="metric">
+          <div class="label"><span class="pill green"></span>Served</div>
+          <div class="value">{{ served_tokens|default:0 }}</div>
+          <div class="hint">Completed / Used tokens</div>
+        </div>
 
-      <p class="muted">Waiting Tokens:
-        <strong style="color:#fff;">{{ waiting|default:0 }}</strong>
-      </p>
+        <div class="metric">
+          <div class="label"><span class="pill amber"></span>Waiting</div>
+          <div class="value">{{ waiting_tokens|default:0 }}</div>
+          <div class="hint">Active tokens not yet served</div>
+        </div>
 
-      <p class="muted">Average Wait:
-        <strong style="color:#fff;">
-          {% if avg_wait %}
-            {{ avg_wait }}
-          {% else %}
-            —
-          {% endif %}
-        </strong>
-      </p>
+        <div class="metric">
+          <div class="label"><span class="pill blue"></span>Average Wait</div>
+          <div class="value">
+            {% if avg_wait_minutes %}
+              {{ avg_wait_minutes }} <span class="muted" style="font-size:14px; font-weight:700;">min</span>
+            {% else %}
+              —
+            {% endif %}
+          </div>
+          <div class="hint">Based on served tokens today</div>
+        </div>
+      </div>
     </div>
 
     <div class="grid">
       <div class="card">
-        <h2 style="margin-top:0;">Quick Links</h2>
-        <p><a href="/ui/counter/">Counter Screen</a></p>
-        <p><a href="/ui/display/">Customer Display</a></p>
+        <h2>Quick Links</h2>
+        <p class="muted" style="margin:0 0 10px;">
+          Use these to manage counters and live display screens.
+        </p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <a class="btn" href="/ui/counter/">Open Counter Screen</a>
+          <a class="btn" href="/ui/display/">Open Customer Display</a>
+        </div>
+
+        <div style="margin-top:14px;" class="empty">
+          Tip: Issue tokens from reception (unassigned), then counters can “Call Next” to auto-assign.
+        </div>
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0;">Per Counter</h2>
+        <h2>Per Counter</h2>
 
         {% if per_counter %}
-          <table>
+          <table class="table">
             <thead>
               <tr>
                 <th>Counter</th>
@@ -79,7 +333,13 @@
             <tbody>
               {% for row in per_counter %}
                 <tr>
-                  <td>{{ row.counter__code|default:"(unassigned)" }}</td>
+                  <td>
+                    {% if row.code %}
+                      <span class="badge"><span class="dot teal"></span>{{ row.code }} — {{ row.name }}</span>
+                    {% else %}
+                      <span class="badge"><span class="dot blue"></span>{{ row.name }}</span>
+                    {% endif %}
+                  </td>
                   <td>{{ row.issued|default:0 }}</td>
                   <td>{{ row.served|default:0 }}</td>
                   <td>{{ row.waiting|default:0 }}</td>
@@ -88,7 +348,7 @@
             </tbody>
           </table>
         {% else %}
-          <p class="muted">No data for today yet.</p>
+          <div class="empty">No data for today yet.</div>
         {% endif %}
       </div>
     </div>
