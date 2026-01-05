@@ -94,18 +94,12 @@ def _set_used_at_if_exists(token):
 
 
 def _today_queryset():
-    """
-    Base queryset for "today".
-
-    Primary source of truth: service_date == localdate()
-    Fallback: service_date is NULL but created_at's date is today
-    (helps if older records were created without service_date).
-    """
     service_date = timezone.localdate()
     return Token.objects.filter(
         Q(service_date=service_date) |
         Q(service_date__isnull=True, created_at__date=service_date)
     ).distinct()
+
 
 
 
