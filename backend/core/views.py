@@ -3,7 +3,15 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction, IntegrityError
-from django.db.models import Avg, F, ExpressionWrapper, DurationField, IntegerField, Max
+from django.db.models import (
+    Avg,
+    F,
+    ExpressionWrapper,
+    DurationField,
+    IntegerField,
+    Max,
+    Q,
+)
 from django.db.models.functions import Substr, Cast
 from django.http import JsonResponse
 from django.shortcuts import render
@@ -40,6 +48,10 @@ def _token_field_names(model_cls):
 
 
 def _set_first_existing_field(obj, candidates, value):
+    """
+    Safely set name/phone/address fields even if your Token model uses
+    different field names (customer_name vs patient_name etc).
+    """
     if value is None:
         return False
     value = str(value).strip()
@@ -70,7 +82,35 @@ def _get_token_details(token):
     }
 
 
-def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
+def _set_used_at_if_exists(token):
+    """Some models might not have used_at. Set only if present."""
+    if "used_at" in _token_field_names(token.__class__):
+        token.used_at = timezone.now()
+        return True
+    return False
+
+
+def _today_queryset():
+    """
+    Base queryset for "today".
+
+    Primary source of truth: service_date == localdate()
+    Fallback: service_date is NULL but created_at's date is today
+    (helps if older records were created without service_date).
+    """
+    service_date = timezone.localdate()
+    return (
+        Token.objects.filter(service_date=service_date)
+        | Token.objects.filter(service_date__isnull=True, created_at__date=service_date)
+    )
+
+
+def _issue_token_for_today(*, counter=None, name="", phone="", address="") -> Token:
+    """
+    Issues a token for today. Counter can be:
+    - None => reception style (unassigned)
+    - Counter instance => directly assigned
+    """
     service_date = timezone.localdate()
     prefix_len = len(TOKEN_PREFIX)
 
@@ -90,8 +130,8 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
                 number = f"{TOKEN_PREFIX}{next_seq:0{TOKEN_PAD}d}"
 
                 token = Token.objects.create(
-                    counter=counter,
-                    service_date=service_date,
+                    counter=counter,                 # ✅ can be None (reception)
+                    service_date=service_date,       # ✅ consistent day anchor
                     sequence=next_seq,
                     number=number,
                     status=STATUS_ACTIVE,
@@ -115,7 +155,8 @@ def _issue_token_for_today(*, counter, name="", phone="", address="") -> Token:
 
 # -------------------------
 # API: issue token
-# POST {"counter":"A1", "name":"", "phone":"", "address":""}
+# POST {"counter":"A1"(optional), "name":"", "phone":"", "address":""}
+# If counter is omitted/blank => reception-style unassigned token.
 # -------------------------
 @csrf_exempt
 def issue_token(request):
@@ -123,18 +164,19 @@ def issue_token(request):
         return JsonResponse({"ok": False, "error": "POST required"}, status=405)
 
     body = _read_json(request)
-    counter_code = str(body.get("counter", "")).strip()
-    if not counter_code:
-        return JsonResponse({"ok": False, "error": "counter is required"}, status=400)
+
+    counter_code = str(body.get("counter", "") or "").strip()  # optional now
 
     name = str(body.get("name", "") or "").strip()
     phone = str(body.get("phone", "") or "").strip()
     address = str(body.get("address", "") or "").strip()
 
-    try:
-        counter = Counter.objects.get(code=counter_code, is_active=True)
-    except Counter.DoesNotExist:
-        return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
+    counter = None
+    if counter_code:
+        try:
+            counter = Counter.objects.get(code=counter_code, is_active=True)
+        except Counter.DoesNotExist:
+            return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
 
     try:
         token = _issue_token_for_today(counter=counter, name=name, phone=phone, address=address)
@@ -145,7 +187,7 @@ def issue_token(request):
 
     return JsonResponse({
         "ok": True,
-        "counter": counter.code,
+        "counter": counter.code if counter else None,
         "number": token.number,
         "token_id": token.id,
         "status": token.status,
@@ -157,6 +199,12 @@ def issue_token(request):
 # -------------------------
 # API: next token (call next)
 # POST {"counter":"A1"}
+#
+# ✅ FIX: counter should pull from:
+#   - tokens already assigned to this counter
+#   - OR unassigned tokens (reception flow)
+#
+# ✅ When it picks an unassigned token, it ASSIGNS it to this counter.
 # -------------------------
 @csrf_exempt
 def next_token(request):
@@ -173,30 +221,50 @@ def next_token(request):
     except Counter.DoesNotExist:
         return JsonResponse({"ok": False, "error": "Counter not found or inactive"}, status=404)
 
+    service_date = timezone.localdate()
+
     with transaction.atomic():
+        # Prefer unassigned first, then counter-assigned
         token = (
             Token.objects.select_for_update()
-            .filter(counter=counter, status=STATUS_ACTIVE)
-            .order_by("created_at", "id")
-            .first()
+            .filter(service_date=service_date, status=STATUS_ACTIVE)
+            .filter(Q(counter__isnull=True) | Q(counter=counter))
+            .order_by("counter__isnull", "sequence", "id")  # counter__isnull False first?
         )
 
-        while token and hasattr(token, "is_expired") and token.is_expired():
+        # The above order_by makes counter__isnull False first (because False < True).
+        # We want UNASSIGNED first, so flip:
+        token = token.order_by("-counter__isnull", "sequence", "id").first()
+
+        # Expire any expired tokens (if model supports is_expired())
+        while token and hasattr(token, "is_expired") and callable(getattr(token, "is_expired")) and token.is_expired():
             token.status = STATUS_EXPIRED
             token.save(update_fields=["status"])
             token = (
                 Token.objects.select_for_update()
-                .filter(counter=counter, status=STATUS_ACTIVE)
-                .order_by("created_at", "id")
+                .filter(service_date=service_date, status=STATUS_ACTIVE)
+                .filter(Q(counter__isnull=True) | Q(counter=counter))
+                .order_by("-counter__isnull", "sequence", "id")
                 .first()
             )
 
         if not token:
             return JsonResponse({"ok": False, "error": "No active tokens"}, status=404)
 
+        # ✅ If it was unassigned, assign it to this counter now
+        if token.counter_id is None:
+            token.counter = counter
+
         token.status = STATUS_USED
-        token.used_at = timezone.now()
-        token.save(update_fields=["status", "used_at"])
+        used_at_changed = _set_used_at_if_exists(token)
+
+        fields = ["status"]
+        if token.counter_id:
+            fields.append("counter")
+        if used_at_changed:
+            fields.append("used_at")
+
+        token.save(update_fields=fields)
 
     details = _get_token_details(token)
 
@@ -207,13 +275,13 @@ def next_token(request):
         "number": token.number,
         "token_id": token.id,
         "status": token.status,
-        "used_at": token.used_at.isoformat() if token.used_at else None,
+        "used_at": token.used_at.isoformat() if hasattr(token, "used_at") and token.used_at else None,
         **details,
     })
 
 
 # -------------------------
-# API: token status by number  ✅ REQUIRED BY URLCONF
+# API: token status by number
 # GET /api/token/status/<number>/
 # -------------------------
 @require_GET
@@ -228,7 +296,7 @@ def token_status(request, number):
         "ok": True,
         "number": token.number,
         "status": token.status,
-        "service_date": str(token.service_date),
+        "service_date": str(token.service_date) if token.service_date else None,
         "counter": token.counter.code if token.counter else None,
         **details,
     })
@@ -237,6 +305,10 @@ def token_status(request, number):
 # -------------------------
 # API: queue status
 # GET /api/queue/status/?counter=A1
+#
+# ✅ FIX: If counter specified, it should show tokens that are:
+#   - assigned to that counter
+#   - OR unassigned (since that counter can pull them next)
 # -------------------------
 @require_GET
 def queue_status(request):
@@ -245,16 +317,17 @@ def queue_status(request):
 
     base = Token.objects.filter(service_date=service_date)
 
+    counter = None
     if counter_code:
         try:
             counter = Counter.objects.get(code=counter_code, is_active=True)
         except Counter.DoesNotExist:
             return JsonResponse({"ok": False, "error": "Counter not found"}, status=404)
-        base = base.filter(counter=counter)
-    else:
-        counter = None
 
-    active = base.filter(status=STATUS_ACTIVE).order_by("created_at", "id")
+        base = base.filter(Q(counter=counter) | Q(counter__isnull=True))
+
+    active = base.filter(status=STATUS_ACTIVE).order_by("sequence", "id")
+
     waiting_list = []
     for t in active[:50]:
         d = _get_token_details(t)
@@ -265,13 +338,14 @@ def queue_status(request):
             "customer_phone": d["customer_phone"],
             "customer_address": d["customer_address"],
             "status": t.status,
+            "counter": t.counter.code if t.counter else None,
         })
 
     last_used = (
-        base.filter(status=STATUS_USED, used_at__isnull=False)
-        .order_by("-used_at", "-id")
-        .first()
+        base.filter(status=STATUS_USED)
+        .exclude(used_at__isnull=True) if "used_at" in _token_field_names(Token) else base.filter(status=STATUS_USED)
     )
+    last_used = last_used.order_by("-used_at", "-id").first() if "used_at" in _token_field_names(Token) else last_used.order_by("-id").first()
 
     return JsonResponse({
         "ok": True,
@@ -290,23 +364,40 @@ def queue_status(request):
 @login_required
 def admin_dashboard(request):
     service_date = timezone.localdate()
-    today = Token.objects.filter(service_date=service_date)
+
+    # ✅ Robust "today" set (service_date OR fallback if service_date missing)
+    today = _today_queryset()
 
     total_tokens = today.count()
     served_tokens = today.filter(status=STATUS_USED).count()
     waiting_tokens = today.filter(status=STATUS_ACTIVE).count()
 
     avg_wait = None
-    used_qs = today.filter(status=STATUS_USED, used_at__isnull=False, created_at__isnull=False).annotate(
-        wait=ExpressionWrapper(F("used_at") - F("created_at"), output_field=DurationField())
-    )
-    if used_qs.exists():
-        avg = used_qs.aggregate(a=Avg("wait"))["a"]
-        if avg:
-            avg_wait = int(avg.total_seconds() // 60)
+    if "used_at" in _token_field_names(Token) and "created_at" in _token_field_names(Token):
+        used_qs = today.filter(
+            status=STATUS_USED,
+            used_at__isnull=False,
+            created_at__isnull=False,
+        ).annotate(
+            wait=ExpressionWrapper(F("used_at") - F("created_at"), output_field=DurationField())
+        )
+        if used_qs.exists():
+            avg = used_qs.aggregate(a=Avg("wait"))["a"]
+            if avg:
+                avg_wait = int(avg.total_seconds() // 60)
 
     counters = Counter.objects.filter(is_active=True).order_by("code")
+
     per_counter = []
+    # ✅ Include unassigned row first
+    per_counter.append({
+        "code": None,
+        "name": "(unassigned)",
+        "issued": today.filter(counter__isnull=True).count(),
+        "served": today.filter(counter__isnull=True, status=STATUS_USED).count(),
+        "waiting": today.filter(counter__isnull=True, status=STATUS_ACTIVE).count(),
+    })
+
     for c in counters:
         per_counter.append({
             "code": c.code,
